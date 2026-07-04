@@ -1034,8 +1034,7 @@ export default function SpirographPage() {
     const startColor = rainbow ? "hsl(0,85%,62%)" : penColor;
     const newRun: TraceRun = { points: [], color: startColor, weight: penWeight };
     currentRunRef.current = newRun;
-    if (compositeMode) traceRunsRef.current.push(newRun);
-    else               traceRunsRef.current = [newRun];
+    traceRunsRef.current.push(newRun);
     // Extra ring runs
     extraRunsRef.current = [];
     for (let ri = 0; ri < penCount - 1; ri++) {
@@ -1063,8 +1062,7 @@ export default function SpirographPage() {
     const startColor = rainbow ? "hsl(0,85%,62%)" : penColor;
     const newRun: TraceRun = { points: [], color: startColor, weight: penWeight };
     currentRunRef.current = newRun;
-    if (compositeMode) traceRunsRef.current.push(newRun);
-    else               traceRunsRef.current = [newRun];
+    traceRunsRef.current.push(newRun);
     // Extra ring runs (rings 2–5)
     extraRunsRef.current = [];
     for (let ri = 0; ri < penCount - 1; ri++) {
