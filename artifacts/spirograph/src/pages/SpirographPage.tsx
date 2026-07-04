@@ -241,6 +241,7 @@ export default function SpirographPage() {
   const [nestedRatio,     setNestedRatio]     = useState(40);  // % of gear 1 radius (20–70)
   const [nestedSpeed,     setNestedSpeed]     = useState(3);   // integer N (1–8)
   const [nestedPenOffset, setNestedPenOffset] = useState(0.7); // 0–1 of nested gear radius
+  const [penMode,     setPenMode]     = useState<"interior" | "circumference">("interior");
   const [penOffset,   setPenOffset]   = useState(0.65);
   const [penCount,    setPenCount]    = useState(1);
   const [penWeight,   setPenWeight]   = useState(2);
@@ -250,6 +251,8 @@ export default function SpirographPage() {
   const [speed,       setSpeed]       = useState<SpeedMode>("full");
   const [isPlaying,   setIsPlaying]   = useState(false);
   const [hasTrace,    setHasTrace]    = useState(false);
+
+  const effectivePenOffset = penMode === "circumference" ? 1.0 : penOffset;
 
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const traceRunsRef  = useRef<TraceRun[]>([]);
@@ -821,7 +824,7 @@ export default function SpirographPage() {
     rebuildTables(fixedShape, fixedEcc, fixedSides,
       movingShape, movingEcc, movingSides, gear, meshMode);
     if (!isPlaying) drawGhost(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor, penWeight, penCount,
+      movingShape, movingEcc, movingSides, gear, meshMode, effectivePenOffset, penColor, penWeight, penCount,
       nestedEnabled, gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
   }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -837,7 +840,7 @@ export default function SpirographPage() {
     const capMode    = meshMode;
     const capFShape  = fixedShape;  const capFEcc  = fixedEcc;  const capFSides = fixedSides;
     const capMShape  = movingShape; const capMEcc  = movingEcc; const capMSides = movingSides;
-    const capPen     = penOffset;   const capColor = penColor;  const capWeight = penWeight;
+    const capPen     = effectivePenOffset; const capColor = penColor; const capWeight = penWeight;
     const capRainbow = rainbow;     const capComposite = compositeMode;
     const capRings   = penCount;
     const capNested  = nestedEnabled;
@@ -941,7 +944,7 @@ export default function SpirographPage() {
     rafRef.current = requestAnimationFrame(loop);
     return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
   }, [isPlaying, speed, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
-      penOffset, penCount, penColor, penWeight, rainbow, compositeMode,
+      effectivePenOffset, penOffset, penCount, penColor, penWeight, rainbow, compositeMode,
       nestedEnabled, nestedRatio, nestedSpeed, nestedPenOffset,
       getCanvasSize, renderFrame]);
 
@@ -956,7 +959,7 @@ export default function SpirographPage() {
       if (canvas.width === size && canvas.height === size) return;
       canvas.width = size; canvas.height = size;
       if (!isPlaying) drawIdle(fixedShape, fixedEcc, fixedSides,
-        movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, penOffset, penColor);
+        movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, effectivePenOffset, penColor);
     });
     const parent = canvasRef.current?.parentElement;
     if (parent) ro.observe(parent);
@@ -987,21 +990,21 @@ export default function SpirographPage() {
     const presetRatio = Math.min(80, Math.max(20, Math.round((GEAR_PRESETS[idx].radius / FIXED_BASE_R) * 100)));
     setGearRatio(presetRatio);
     const { fShape, fEcc, fSides, mShape, mEcc, mSides, mode } = cur();
-    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, makeEffectiveGear(idx, presetRatio), mode, penOffset);
-  }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, makeEffectiveGear(idx, presetRatio), mode, effectivePenOffset);
+  }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMeshMode = useCallback((mode: MeshMode) => {
     setMeshMode(mode);
     const { fShape, fEcc, fSides, mShape, mEcc, mSides, gear } = cur();
-    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, penOffset);
-  }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, effectivePenOffset);
+  }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleFixedShape  = useCallback((s: GearShape) => { setFixedShape(s);  const c = cur(); applyGearParams(s, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleFixedEcc    = useCallback((v: number)    => { setFixedEcc(v);    const c = cur(); applyGearParams(c.fShape, v, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleFixedSides  = useCallback((v: number)    => { setFixedSides(v);  const c = cur(); applyGearParams(c.fShape, c.fEcc, v, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleMovingShape = useCallback((s: GearShape) => { setMovingShape(s); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, s, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleMovingEcc   = useCallback((v: number)    => { setMovingEcc(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, v, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleMovingSides = useCallback((v: number)    => { setMovingSides(v); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, v, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleFixedShape  = useCallback((s: GearShape) => { setFixedShape(s);  const c = cur(); applyGearParams(s, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, effectivePenOffset); }, [fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleFixedEcc    = useCallback((v: number)    => { setFixedEcc(v);    const c = cur(); applyGearParams(c.fShape, v, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, effectivePenOffset); }, [fixedShape, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleFixedSides  = useCallback((v: number)    => { setFixedSides(v);  const c = cur(); applyGearParams(c.fShape, c.fEcc, v, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, effectivePenOffset); }, [fixedShape, fixedEcc, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMovingShape = useCallback((s: GearShape) => { setMovingShape(s); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, s, c.mEcc, c.mSides, c.gear, c.mode, effectivePenOffset); }, [fixedShape, fixedEcc, fixedSides, movingEcc, movingSides, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMovingEcc   = useCallback((v: number)    => { setMovingEcc(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, v, c.mSides, c.gear, c.mode, effectivePenOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingSides, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMovingSides = useCallback((v: number)    => { setMovingSides(v); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, v, c.gear, c.mode, effectivePenOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
   const handlePenOffset   = useCallback((v: number)    => { setPenOffset(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, v); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Randomize handler ───────────────────────────────────────────────────────
@@ -1051,8 +1054,8 @@ export default function SpirographPage() {
   const handleGearRatioInput = useCallback((v: number) => {
     setGearRatio(v);
     const c = cur();
-    if (!isPlaying) applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, makeEffectiveGear(gearIdx, v), c.mode, penOffset);
-  }, [isPlaying, gearIdx, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isPlaying) applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, makeEffectiveGear(gearIdx, v), c.mode, effectivePenOffset);
+  }, [isPlaying, gearIdx, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startPlay = useCallback(() => {
     const gear = makeEffectiveGear(gearIdx, gearRatio);
@@ -1083,9 +1086,9 @@ export default function SpirographPage() {
     traceRunsRef.current = []; currentRunRef.current = null; extraRunsRef.current = [];
     setHasTrace(false);
     setTimeout(() => drawIdle(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, penOffset, penColor), 0);
+      movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, effectivePenOffset, penColor), 0);
   }, [stopPlay, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
-      penOffset, penColor, drawIdle]);
+      effectivePenOffset, penColor, drawIdle]);
 
   const selectedGear = GEAR_PRESETS[gearIdx];
   const computedGear = makeEffectiveGear(gearIdx, gearRatio);
@@ -1242,11 +1245,34 @@ export default function SpirographPage() {
           <div className="h-px bg-border/50" />
 
           {/* ── Pen controls ─────────────────────────────────────── */}
-          <section>
-            <ControlSlider label="Pen Offset" value={penOffset} min={0.01} max={1} step={0.01}
-              onChange={(v) => setPenOffset(v)} onInput={handlePenOffset}
-              display={(v) => `${Math.round(v * 100)}%`} />
-            <p className="text-[10px] text-muted-foreground/60 mt-1">0% = gear center · 100% = edge</p>
+          <section className="flex flex-col gap-2">
+            <div className="flex items-baseline justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Pen Position</p>
+            </div>
+            <div className="flex gap-1">
+              {(["interior", "circumference"] as const).map((m) => (
+                <button key={m} onClick={() => { setPenMode(m); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, m === "circumference" ? 1.0 : penOffset); }} disabled={isPlaying}
+                  className={["flex-1 h-7 rounded text-[10px] font-semibold border transition-all capitalize",
+                    penMode === m
+                      ? "bg-primary/14 text-primary border-primary/25"
+                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                    isPlaying ? "opacity-40 cursor-not-allowed" : "",
+                  ].join(" ")}>
+                  {m === "interior" ? "Interior" : "Edge"}
+                </button>
+              ))}
+            </div>
+            {penMode === "interior" && (
+              <>
+                <ControlSlider label="Pen Offset" value={penOffset} min={0.01} max={0.99} step={0.01}
+                  onChange={(v) => setPenOffset(v)} onInput={handlePenOffset}
+                  display={(v) => `${Math.round(v * 100)}%`} />
+                <p className="text-[10px] text-muted-foreground/60 -mt-1">0% = center · 99% = near edge</p>
+              </>
+            )}
+            {penMode === "circumference" && (
+              <p className="text-[10px] text-muted-foreground/60">Pen locked to gear edge (100%)</p>
+            )}
           </section>
 
           {/* ── Rings (multiple simultaneous pens) ───────────────── */}
