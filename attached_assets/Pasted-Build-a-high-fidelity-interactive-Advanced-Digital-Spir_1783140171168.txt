@@ -1,0 +1,31 @@
+Build a high-fidelity, interactive "Advanced Digital Spirograph" web application. This is not a standard Spirograph; it must support Non-Circular Gears (NCG).
+
+Core Technical Requirement: Non-Circular Gear Logic
+The app must simulate two gears (Fixed and Moving) that mesh without slipping. 
+1. Gear Profiles: Implement a system where gear radii $R(\theta)$ can be changed. Start with:
+   - Circular: Constant radius.
+   - Elliptical: Radius varies based on the ellipse formula.
+   - Super-ellipse/Polygon: A custom periodic function for the radius.
+2. Meshing Engine: You must use Arc-Length Integration. The distance between the center of the fixed gear and the moving gear must always equal the sum of their radii at the point of contact. Use numerical integration to ensure the moving gear rotates at a variable speed based on the fixed gear's profile.
+3. Pen Coordinates: The pen position should be calculated as the center of the moving gear plus the pen's offset relative to that center.
+
+User Interface & Interaction Map:
+- The Lab (Sidebar): 
+    - A dropdown to select gear shapes (Circle, Ellipse, Polygon).
+    - An "Eccentricity" slider to control the stretch of non-circular shapes.
+    - A "Pen Offset" slider to move the pen from the center to the edge of the gear.
+    - A "Pen Weight" slider (0.5px to 10px) and a Color Picker.
+    - A "Composite Mode" toggle (Layer multiple colors vs. Clear canvas on start).
+- The Stage (Center): 
+    - A canvas displaying the two gears actually rotating and meshing.
+    - A "Ghost Trace" that shows a faint preview of the pattern as the user adjusts sliders.
+- Playback Controls: 
+    - A floating controller with three speed modes: "Partial" (Real-time), "Full" (Normal), and "Accelerated" (Fast-forward).
+
+Aesthetic & "Feel" (The Craft):
+- Visuals: Use a dark, premium theme. Give the gears a "brushed metal" look using CSS gradients.
+- Dynamic Motion: Ensure the pen speed visually fluctuates (accelerates/decelerates) when using elliptical gears to create a "pulsing" organic feel.
+- Ink Effect: Use anti-aliased lines on an HTML5 Canvas to mimic real ink.
+
+Deliverable:
+A fully functional, single-page React/TypeScript application (or vanilla JS/HTML) that prioritizes the mathematical accuracy of the gear meshing and the tactile feel of the drawing process.
