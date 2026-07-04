@@ -53,6 +53,112 @@ const SPEED_DELTAS: Record<SpeedMode, number> = { partial: 0.005, full: 0.018, a
 
 interface TraceRun { points: { x: number; y: number }[]; color: string; weight: number; }
 
+// ─── 3-Body simulation ────────────────────────────────────────────────────────
+interface NBodyState { x: number; y: number; vx: number; vy: number; m: number; }
+interface NBodyDeriv  { dx: number; dy: number; dvx: number; dvy: number; }
+interface NBodyPresetDef {
+  name: string; desc: string; scale: number; dt: number; bodies: NBodyState[];
+}
+
+const NBODY_COLORS = ["#f87171", "#60a5fa", "#34d399"] as const;
+
+const NBODY_PRESETS: Record<string, NBodyPresetDef> = {
+  figure8: {
+    name: "Figure-8", desc: "Stable choreography — all three trace a shared figure-8",
+    scale: 190, dt: 0.004,
+    bodies: [
+      { x: -0.97000436, y:  0.24308753, vx:  0.466203685, vy:  0.43236573, m: 1 },
+      { x:  0.97000436, y: -0.24308753, vx:  0.466203685, vy:  0.43236573, m: 1 },
+      { x:  0,          y:  0,          vx: -0.93240737,  vy: -0.86473146, m: 1 },
+    ],
+  },
+  lagrange: {
+    name: "Lagrange Triangle", desc: "Equal masses at equilateral triangle vertices — stable orbit",
+    scale: 200, dt: 0.006,
+    bodies: [
+      { x:  1,    y:  0,     vx:  0,       vy:  0.7603, m: 1 },
+      { x: -0.5,  y:  0.866, vx: -0.6585,  vy: -0.3802, m: 1 },
+      { x: -0.5,  y: -0.866, vx:  0.6585,  vy: -0.3802, m: 1 },
+    ],
+  },
+  pythagorean: {
+    name: "Pythagorean", desc: "Masses 3-4-5 in right triangle — chaotic, one body escapes",
+    scale: 55, dt: 0.003,
+    bodies: [
+      { x:  1,  y:  3,  vx: 0, vy: 0, m: 3 },
+      { x: -2,  y: -1,  vx: 0, vy: 0, m: 4 },
+      { x:  1,  y: -1,  vx: 0, vy: 0, m: 5 },
+    ],
+  },
+  butterfly: {
+    name: "Butterfly", desc: "Two bodies on figure-8 lobes with a central oscillator",
+    scale: 190, dt: 0.004,
+    bodies: [
+      { x: -1,  y:  0, vx:  0.306893, vy:  0.125507, m: 1 },
+      { x:  1,  y:  0, vx:  0.306893, vy:  0.125507, m: 1 },
+      { x:  0,  y:  0, vx: -0.613786, vy: -0.251014, m: 1 },
+    ],
+  },
+  binaryguest: {
+    name: "Binary + Visitor", desc: "Tight binary pair with a hyperbolic third body",
+    scale: 90, dt: 0.005,
+    bodies: [
+      { x: -0.5, y:  0, vx:  0,   vy:  0.8, m: 1 },
+      { x:  0.5, y:  0, vx:  0,   vy: -0.8, m: 1 },
+      { x:  0,   y:  3, vx:  0.4, vy: -0.3, m: 0.3 },
+    ],
+  },
+  chaos: {
+    name: "Chaos", desc: "Nearly collinear — rapid divergence to chaos",
+    scale: 100, dt: 0.003,
+    bodies: [
+      { x: -1,   y:  0.01, vx: 0.1,  vy:  0.3, m: 1 },
+      { x:  0,   y:  0,    vx: 0.1,  vy: -0.5, m: 1.2 },
+      { x:  1.1, y: -0.01, vx: -0.2, vy:  0.2, m: 0.8 },
+    ],
+  },
+};
+
+function nbodyDerivs(bodies: NBodyState[]): NBodyDeriv[] {
+  const d: NBodyDeriv[] = bodies.map(b => ({ dx: b.vx, dy: b.vy, dvx: 0, dvy: 0 }));
+  for (let i = 0; i < bodies.length; i++) {
+    for (let j = i + 1; j < bodies.length; j++) {
+      const ddx = bodies[j].x - bodies[i].x;
+      const ddy = bodies[j].y - bodies[i].y;
+      const r2  = ddx * ddx + ddy * ddy + 1e-5; // softening
+      const r3  = r2 * Math.sqrt(r2);
+      const fij = 1 / r3; // G = 1
+      d[i].dvx += fij * bodies[j].m * ddx;
+      d[i].dvy += fij * bodies[j].m * ddy;
+      d[j].dvx -= fij * bodies[i].m * ddx;
+      d[j].dvy -= fij * bodies[i].m * ddy;
+    }
+  }
+  return d;
+}
+
+function nbodyAddScaled(b: NBodyState[], d: NBodyDeriv[], s: number): NBodyState[] {
+  return b.map((body, i) => ({
+    ...body,
+    x: body.x + s * d[i].dx, y: body.y + s * d[i].dy,
+    vx: body.vx + s * d[i].dvx, vy: body.vy + s * d[i].dvy,
+  }));
+}
+
+function nbodyRK4(bodies: NBodyState[], dt: number): NBodyState[] {
+  const k1 = nbodyDerivs(bodies);
+  const k2 = nbodyDerivs(nbodyAddScaled(bodies, k1, dt / 2));
+  const k3 = nbodyDerivs(nbodyAddScaled(bodies, k2, dt / 2));
+  const k4 = nbodyDerivs(nbodyAddScaled(bodies, k3, dt));
+  return bodies.map((b, i) => ({
+    ...b,
+    x:  b.x  + (dt / 6) * (k1[i].dx  + 2 * k2[i].dx  + 2 * k3[i].dx  + k4[i].dx),
+    y:  b.y  + (dt / 6) * (k1[i].dy  + 2 * k2[i].dy  + 2 * k3[i].dy  + k4[i].dy),
+    vx: b.vx + (dt / 6) * (k1[i].dvx + 2 * k2[i].dvx + 2 * k3[i].dvx + k4[i].dvx),
+    vy: b.vy + (dt / 6) * (k1[i].dvy + 2 * k2[i].dvy + 2 * k3[i].dvy + k4[i].dvy),
+  }));
+}
+
 // ─── Nested gear math ─────────────────────────────────────────────────────────
 // Computes the position of a small gear rolling inside the primary moving gear.
 // phi, psi1: primary gear driver and arc-length angle from computeMeshState.
@@ -252,6 +358,12 @@ export default function SpirographPage() {
   const [isPlaying,   setIsPlaying]   = useState(false);
   const [hasTrace,    setHasTrace]    = useState(false);
 
+  // ── 3-Body engine state ──────────────────────────────────────────────────────
+  const [drawingEngine, setDrawingEngine] = useState<"spirograph" | "threebody">("spirograph");
+  const [nbodyPreset,   setNbodyPreset]   = useState("figure8");
+  const [nbodyTrail,    setNbodyTrail]    = useState(1200); // max points per body trail
+  const [nbodySteps,    setNbodySteps]    = useState(6);    // RK4 sub-steps per frame
+
   const effectivePenOffset = penMode === "circumference" ? 1.0 : penOffset;
 
   const canvasRef     = useRef<HTMLCanvasElement>(null);
@@ -261,6 +373,9 @@ export default function SpirographPage() {
   const extraRunsRef  = useRef<TraceRun[]>([]);
   const rafRef        = useRef<number | null>(null);
   const hueRef        = useRef(0);
+  // 3-body refs
+  const nbodyBodiesRef = useRef<NBodyState[]>([]);
+  const nbodyTrailsRef = useRef<{ x: number; y: number }[][]>([[], [], []]);
 
   const simRef = useRef({
     phi: 0,
@@ -1079,15 +1194,129 @@ export default function SpirographPage() {
   }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       penColor, penWeight, penCount, rainbow, compositeMode, rebuildTables]);
 
+  // ─── 3-Body animation loop ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (drawingEngine !== "threebody" || !isPlaying) {
+      if (drawingEngine === "threebody" && !isPlaying && rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current); rafRef.current = null;
+      }
+      return;
+    }
+
+    const preset = NBODY_PRESETS[nbodyPreset];
+    const capTrail = nbodyTrail;
+    const capSteps = nbodySteps;
+    const capDt    = preset.dt;
+    const capScale = preset.scale;
+
+    // Initialise bodies if empty
+    if (nbodyBodiesRef.current.length === 0) {
+      nbodyBodiesRef.current = preset.bodies.map(b => ({ ...b }));
+      nbodyTrailsRef.current = [[], [], []];
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const loop = () => {
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      const W = canvas.width, H = canvas.height;
+      const cx = W / 2, cy = H / 2;
+
+      // RK4 sub-steps
+      for (let s = 0; s < capSteps; s++) {
+        nbodyBodiesRef.current = nbodyRK4(nbodyBodiesRef.current, capDt);
+      }
+
+      // Record trail points
+      for (let i = 0; i < 3; i++) {
+        const b = nbodyBodiesRef.current[i];
+        nbodyTrailsRef.current[i].push({ x: b.x, y: b.y });
+        if (nbodyTrailsRef.current[i].length > capTrail) {
+          nbodyTrailsRef.current[i].shift();
+        }
+      }
+
+      // Render
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.translate(cx, cy);
+
+      for (let i = 0; i < 3; i++) {
+        const trail = nbodyTrailsRef.current[i];
+        if (trail.length < 2) continue;
+        const color = NBODY_COLORS[i];
+
+        // Draw trail with fading alpha
+        ctx.save();
+        ctx.lineCap = "round"; ctx.lineJoin = "round";
+        const segments = trail.length - 1;
+        for (let t = 0; t < segments; t++) {
+          const alpha = (t / segments);
+          ctx.beginPath();
+          ctx.globalAlpha = alpha * 0.85;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.5 + alpha * 1.0;
+          ctx.moveTo(trail[t].x * capScale, -trail[t].y * capScale);
+          ctx.lineTo(trail[t + 1].x * capScale, -trail[t + 1].y * capScale);
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        // Body dot
+        const b = nbodyBodiesRef.current[i];
+        const dotR = Math.max(3, Math.min(8, b.m * 4));
+        ctx.save();
+        ctx.shadowColor = color + "cc"; ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(b.x * capScale, -b.y * capScale, dotR, 0, TWO_PI);
+        ctx.fillStyle = color; ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.4)"; ctx.lineWidth = 1; ctx.stroke();
+        ctx.restore();
+      }
+
+      // Draw gravity lines between bodies (faint)
+      ctx.save();
+      ctx.globalAlpha = 0.07;
+      ctx.strokeStyle = "#ffffff"; ctx.lineWidth = 0.8;
+      for (let i = 0; i < 3; i++) {
+        for (let j = i + 1; j < 3; j++) {
+          const bi = nbodyBodiesRef.current[i];
+          const bj = nbodyBodiesRef.current[j];
+          ctx.beginPath();
+          ctx.moveTo(bi.x * capScale, -bi.y * capScale);
+          ctx.lineTo(bj.x * capScale, -bj.y * capScale);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+
+      ctx.restore(); // translate(cx, cy)
+
+      rafRef.current = requestAnimationFrame(loop);
+    };
+
+    rafRef.current = requestAnimationFrame(loop);
+    return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
+  }, [drawingEngine, isPlaying, nbodyPreset, nbodyTrail, nbodySteps]);
+
   const stopPlay = useCallback(() => setIsPlaying(false), []);
 
   const clearAll = useCallback(() => {
     stopPlay();
     traceRunsRef.current = []; currentRunRef.current = null; extraRunsRef.current = [];
+    nbodyBodiesRef.current = []; nbodyTrailsRef.current = [[], [], []];
     setHasTrace(false);
-    setTimeout(() => drawIdle(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, effectivePenOffset, penColor), 0);
-  }, [stopPlay, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
+    if (drawingEngine === "spirograph") {
+      setTimeout(() => drawIdle(fixedShape, fixedEcc, fixedSides,
+        movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, effectivePenOffset, penColor), 0);
+    } else {
+      // Clear canvas for 3-body
+      const canvas = canvasRef.current;
+      if (canvas) { const ctx = canvas.getContext("2d"); ctx?.clearRect(0, 0, canvas.width, canvas.height); }
+    }
+  }, [stopPlay, drawingEngine, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       effectivePenOffset, penColor, drawIdle]);
 
   const selectedGear = GEAR_PRESETS[gearIdx];
@@ -1121,6 +1350,86 @@ export default function SpirographPage() {
         </div>
 
         <div className="flex flex-col gap-4 px-4 py-4 flex-1">
+
+          {/* ── Engine toggle ─────────────────────────────────────── */}
+          <section>
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Engine</p>
+            <div className="flex gap-1">
+              {(["spirograph", "threebody"] as const).map((eng) => (
+                <button key={eng} disabled={isPlaying}
+                  onClick={() => { if (eng !== drawingEngine) { stopPlay(); setDrawingEngine(eng); nbodyBodiesRef.current = []; nbodyTrailsRef.current = [[], [], []]; } }}
+                  className={["flex-1 py-1.5 rounded text-[10px] font-semibold border transition-all",
+                    drawingEngine === eng
+                      ? "bg-primary/14 text-primary border-primary/25"
+                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                    isPlaying ? "opacity-40 cursor-not-allowed" : "",
+                  ].join(" ")}>
+                  {eng === "spirograph" ? "Spirograph" : "3-Body"}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <div className="border-t border-border/50" />
+
+          {/* ═══════════ 3-BODY CONTROLS ═══════════ */}
+          {drawingEngine === "threebody" && (<>
+
+            <section className="flex flex-col gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Preset</p>
+              <div className="flex flex-col gap-1">
+                {Object.entries(NBODY_PRESETS).map(([key, p]) => (
+                  <button key={key} disabled={isPlaying}
+                    onClick={() => { setNbodyPreset(key); nbodyBodiesRef.current = []; nbodyTrailsRef.current = [[], [], []]; }}
+                    className={["w-full text-left px-2.5 py-1.5 rounded-md text-[10px] border transition-all",
+                      nbodyPreset === key
+                        ? "bg-primary/14 text-primary border-primary/25"
+                        : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                      isPlaying ? "opacity-40 cursor-not-allowed" : "",
+                    ].join(" ")}>
+                    <span className="font-semibold">{p.name}</span>
+                    <span className="opacity-60 ml-1">— {p.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <div className="border-t border-border/50" />
+
+            <section className="flex flex-col gap-2">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Bodies</p>
+              <div className="flex gap-3 items-center">
+                {NBODY_COLORS.map((col, i) => (
+                  <div key={i} className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded-full border border-white/20" style={{ background: col }} />
+                    <span className="text-[10px] text-muted-foreground">{["α","β","γ"][i]}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            <div className="border-t border-border/50" />
+
+            <section className="flex flex-col gap-2">
+              <ControlSlider label="Trail Length" value={nbodyTrail} min={100} max={4000} step={100}
+                onChange={setNbodyTrail} display={(v) => `${v} pts`} />
+              <ControlSlider label="Speed" value={nbodySteps} min={1} max={20} step={1}
+                onChange={setNbodySteps} display={(v) => `${v}× steps/frame`} />
+            </section>
+
+            <div className="border-t border-border/50" />
+
+            <section>
+              <button onClick={clearAll}
+                className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/25 transition-colors">
+                Reset Simulation
+              </button>
+            </section>
+
+          </>)}
+
+          {/* ═══════════ SPIROGRAPH CONTROLS ═══════════ */}
+          {drawingEngine === "spirograph" && (<>
 
           {/* ── Mesh Mode ─────────────────────────────────────────── */}
           <section>
@@ -1414,10 +1723,14 @@ export default function SpirographPage() {
             </button>
           </section>
 
+          </>)}
+
         </div>
 
         <div className="px-4 py-3 border-t border-border">
-          <p className="text-[10px] text-muted-foreground/40">Arc-length integration · No-slip meshing</p>
+          <p className="text-[10px] text-muted-foreground/40">
+            {drawingEngine === "spirograph" ? "Arc-length integration · No-slip meshing" : "RK4 integrator · G = 1 natural units"}
+          </p>
         </div>
       </aside>
 
@@ -1440,7 +1753,7 @@ export default function SpirographPage() {
         {/* Playback controller */}
         <div className="absolute bottom-7 left-1/2 -translate-x-1/2 z-10">
           <div className="flex items-center gap-2 px-3 py-2.5 rounded-2xl border border-border bg-card/85 backdrop-blur-md shadow-2xl">
-            <button onClick={isPlaying ? stopPlay : startPlay}
+            <button onClick={isPlaying ? stopPlay : (drawingEngine === "threebody" ? () => { nbodyBodiesRef.current = NBODY_PRESETS[nbodyPreset].bodies.map(b => ({ ...b })); nbodyTrailsRef.current = [[], [], []]; setIsPlaying(true); } : startPlay)}
               className="w-10 h-10 rounded-xl flex items-center justify-center bg-primary text-primary-foreground shadow-lg hover:brightness-110 active:scale-95 transition-all duration-100">
               {isPlaying ? (
                 <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
@@ -1474,17 +1787,21 @@ export default function SpirographPage() {
                 <div className="w-px h-6 bg-border mx-0.5" />
                 <div className="flex items-center gap-1.5 pr-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                  <span className="text-[10px] text-primary font-medium">Drawing</span>
+                  <span className="text-[10px] text-primary font-medium">
+                    {drawingEngine === "threebody" ? "Simulating" : "Drawing"}
+                  </span>
                 </div>
               </>
             )}
           </div>
         </div>
 
-        {!isPlaying && !hasTrace && (
+        {!isPlaying && (
           <div className="absolute top-5 left-1/2 -translate-x-1/2 pointer-events-none">
             <p className="text-[11px] text-muted-foreground/45 tracking-wide">
-              Pick a mode · configure gears · press ▶ to draw
+              {drawingEngine === "threebody"
+                ? "Pick a preset · press ▶ to simulate"
+                : "Pick a mode · configure gears · press ▶ to draw"}
             </p>
           </div>
         )}
