@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   buildArcLengthTable,
   computeMeshState,
-  drawPolarCurve,
   gearRadius,
   totalArcLength,
   type GearShape,
@@ -27,29 +26,14 @@ interface TraceRun {
   weight: number;
 }
 
-function buildMetalGradient(
-  ctx: CanvasRenderingContext2D,
-  cx: number, cy: number, r: number, hue: number
-): CanvasGradient {
-  const grad = ctx.createRadialGradient(cx - r * 0.28, cy - r * 0.28, r * 0.06, cx, cy, r * 1.05);
-  grad.addColorStop(0, `hsl(${hue}, 14%, 46%)`);
-  grad.addColorStop(0.25, `hsl(${hue}, 10%, 34%)`);
-  grad.addColorStop(0.55, `hsl(${hue}, 10%, 24%)`);
-  grad.addColorStop(0.8, `hsl(${hue}, 12%, 17%)`);
-  grad.addColorStop(1, `hsl(${hue}, 14%, 11%)`);
-  return grad;
-}
+// Tooth counts: ratio must equal FIXED_BASE_R / MOVING_BASE_R = 155/85 = 31/17
+// Using 31*4 and 17*4 for sufficient visual resolution
+const N_FIXED_TEETH = 124; // 31 × 4
+const N_MOVING_TEETH = 68; // 17 × 4
+const TOOTH_SAMPLES = 18; // canvas path points per tooth
 
-function buildMetalStroke(
-  ctx: CanvasRenderingContext2D,
-  cx: number, cy: number, r: number, hue: number
-): CanvasGradient {
-  const grad = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
-  grad.addColorStop(0, `hsl(${hue}, 22%, 58%)`);
-  grad.addColorStop(0.5, `hsl(${hue}, 12%, 28%)`);
-  grad.addColorStop(1, `hsl(${hue}, 22%, 52%)`);
-  return grad;
-}
+// Pen-hole positions (fraction of moving gear radius)
+const PEN_HOLES = [0.18, 0.32, 0.46, 0.60, 0.74, 0.88];
 
 function ControlSlider({
   label, value, min, max, step, onChange, onInput, display,
@@ -162,92 +146,200 @@ export default function SpirographPage() {
       ctx.restore();
     }
 
-    // ── Draw gears ────────────────────────────────────────────────────────
-    const fixedR = FIXED_BASE_R * scale;
+    // ── Gear geometry ─────────────────────────────────────────────────────
+    const fixedR  = FIXED_BASE_R  * scale;
     const movingR = MOVING_BASE_R * scale;
+    const toothH  = Math.max(5, fixedR * 0.048); // ~5% of radius, ≥5px — clearly visible
+    const ringW   = Math.max(6, fixedR * 0.12);  // ring wall thickness
+    const rotAngle = phi - psi;
+    const mcxS = mcx * scale;
+    const mcyS = mcy * scale;
+
+    const fixedSamples  = N_FIXED_TEETH  * TOOTH_SAMPLES;
+    const movingSamples = N_MOVING_TEETH * TOOTH_SAMPLES;
 
     ctx.save();
     ctx.translate(cx, cy);
 
-    // Fixed gear fill
-    ctx.shadowColor = "rgba(120,100,255,0.22)";
-    ctx.shadowBlur = 20;
-    drawPolarCurve(ctx, sim.shape, fixedR, sim.ecc, 0, 0, 0, POLYGON_SIDES);
-    ctx.fillStyle = buildMetalGradient(ctx, 0, 0, fixedR, 228);
-    ctx.fill();
-    ctx.strokeStyle = buildMetalStroke(ctx, 0, 0, fixedR, 228);
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // Dashed guide ring
-    ctx.save();
-    ctx.setLineDash([4, 8]);
-    ctx.strokeStyle = "rgba(120,100,255,0.12)";
-    ctx.lineWidth = 1;
+    // ── FIXED GEAR — drawn as a ring (evenodd: outer + inner toothed) ────
     ctx.beginPath();
-    ctx.arc(0, 0, fixedR * 0.97, 0, TWO_PI);
+
+    // Outer boundary: smoothly scaled-up version of the gear profile
+    for (let i = 0; i <= fixedSamples; i++) {
+      const t = (i / fixedSamples) * TWO_PI;
+      const r = gearRadius(sim.shape, fixedR + ringW, sim.ecc, t, POLYGON_SIDES);
+      const x = r * Math.cos(t);
+      const y = r * Math.sin(t);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    // Inner boundary: toothed surface (teeth point inward)
+    // profile 0→1: 0.5*(1-cos(t*N)) — peak = 1 (tooth tip most inward)
+    for (let i = 0; i <= fixedSamples; i++) {
+      const t = (i / fixedSamples) * TWO_PI;
+      const base = gearRadius(sim.shape, fixedR, sim.ecc, t, POLYGON_SIDES);
+      const profile = 0.5 * (1 - Math.cos(t * N_FIXED_TEETH));
+      const r = base - toothH * profile; // tip inward
+      const x = r * Math.cos(t);
+      const y = r * Math.sin(t);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    // Fill the ring area (evenodd punches the inner hole)
+    ctx.fillStyle = "rgba(200, 215, 245, 0.10)";
+    ctx.fill("evenodd");
+
+    // Stroke the outer rim
+    ctx.save();
+    ctx.beginPath();
+    for (let i = 0; i <= fixedSamples; i++) {
+      const t = (i / fixedSamples) * TWO_PI;
+      const r = gearRadius(sim.shape, fixedR + ringW, sim.ecc, t, POLYGON_SIDES);
+      if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
+      else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
+    }
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(170, 185, 230, 0.30)";
+    ctx.lineWidth = 1.2;
     ctx.stroke();
     ctx.restore();
 
-    // Cross-hair at center
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
+    // Stroke the inner toothed surface
+    ctx.save();
+    ctx.shadowColor = "rgba(160, 175, 255, 0.25)";
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    for (let i = 0; i <= fixedSamples; i++) {
+      const t = (i / fixedSamples) * TWO_PI;
+      const base = gearRadius(sim.shape, fixedR, sim.ecc, t, POLYGON_SIDES);
+      const profile = 0.5 * (1 - Math.cos(t * N_FIXED_TEETH));
+      const r = base - toothH * profile;
+      if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
+      else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
+    }
+    ctx.closePath();
+    ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+    ctx.restore();
+
+    // ── MOVING GEAR — disk with outward teeth ─────────────────────────────
+    // Moving gear teeth are phase-shifted by π so they interleave with fixed teeth
+    // Base disk fill so the gear body is visible against the dark background
+    ctx.beginPath();
+    ctx.arc(mcxS, mcyS, movingR, 0, TWO_PI);
+    ctx.fillStyle = "rgba(155, 180, 230, 0.14)";
+    ctx.fill();
+
+    // Toothed outline path
+    ctx.beginPath();
+    for (let i = 0; i <= movingSamples; i++) {
+      const localAngle = (i / movingSamples) * TWO_PI;
+      const base = gearRadius(sim.shape, movingR, sim.ecc, localAngle, POLYGON_SIDES);
+      // π-offset profile so peaks align with fixed-gear valleys → perfect interleave
+      const profile = 0.5 * (1 - Math.cos(localAngle * N_MOVING_TEETH + Math.PI));
+      const r = base + toothH * profile; // tip outward
+      const worldAngle = localAngle + rotAngle;
+      const x = mcxS + r * Math.cos(worldAngle);
+      const y = mcyS + r * Math.sin(worldAngle);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+
+    ctx.save();
+    ctx.shadowColor = "rgba(160, 205, 255, 0.55)";
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = "rgba(210, 228, 255, 0.92)";
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.restore();
+
+    // ── Spokes inside the moving gear ────────────────────────────────────
+    const nSpokes = 4;
+    ctx.save();
+    ctx.strokeStyle = "rgba(170, 195, 240, 0.18)";
+    ctx.lineWidth = 0.8;
+    for (let s = 0; s < nSpokes; s++) {
+      const spokeAngle = rotAngle + (s / nSpokes) * TWO_PI;
+      ctx.beginPath();
+      ctx.moveTo(mcxS, mcyS);
+      ctx.lineTo(mcxS + movingR * 0.88 * Math.cos(spokeAngle),
+                 mcyS + movingR * 0.88 * Math.sin(spokeAngle));
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // ── Pen holes on the moving gear ─────────────────────────────────────
+    const holeR = Math.max(2.5, movingR * 0.055);
+    for (const frac of PEN_HOLES) {
+      const hr = frac * movingR;
+      const hx = mcxS + hr * Math.cos(rotAngle);
+      const hy = mcyS + hr * Math.sin(rotAngle);
+      const isActive = Math.abs(frac - curPenOffset) < 0.08;
+      ctx.beginPath();
+      ctx.arc(hx, hy, holeR, 0, TWO_PI);
+      ctx.fillStyle   = isActive ? "rgba(255,255,255,0.22)" : "rgba(140,160,210,0.14)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(185, 205, 255, 0.55)";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
+
+    // ── Moving gear center hub ────────────────────────────────────────────
+    ctx.beginPath();
+    ctx.arc(mcxS, mcyS, Math.max(3, movingR * 0.06), 0, TWO_PI);
+    ctx.fillStyle = "rgba(160, 200, 255, 0.25)";
+    ctx.fill();
+    ctx.strokeStyle = "rgba(185, 210, 255, 0.5)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Fixed gear center crosshair
+    ctx.strokeStyle = "rgba(160, 180, 230, 0.18)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(-fixedR * 0.06, 0); ctx.lineTo(fixedR * 0.06, 0);
-    ctx.moveTo(0, -fixedR * 0.06); ctx.lineTo(0, fixedR * 0.06);
+    ctx.moveTo(-fixedR * 0.055, 0); ctx.lineTo(fixedR * 0.055, 0);
+    ctx.moveTo(0, -fixedR * 0.055); ctx.lineTo(0, fixedR * 0.055);
     ctx.stroke();
 
-    // Moving gear
-    const mcxS = mcx * scale;
-    const mcyS = mcy * scale;
-    const rotAngle = phi - psi;
-    ctx.shadowColor = "rgba(80,220,190,0.18)";
-    ctx.shadowBlur = 14;
-    drawPolarCurve(ctx, sim.shape, movingR, sim.ecc, mcxS, mcyS, rotAngle, POLYGON_SIDES);
-    ctx.fillStyle = buildMetalGradient(ctx, mcxS, mcyS, movingR, 198);
-    ctx.fill();
-    ctx.strokeStyle = buildMetalStroke(ctx, mcxS, mcyS, movingR, 198);
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-
-    // Contact point dot (gold)
+    // ── Contact point (gold dot where teeth mesh) ─────────────────────────
     const contactR = gearRadius(sim.shape, fixedR, sim.ecc, phi, POLYGON_SIDES);
-    ctx.shadowColor = "rgba(255,210,80,0.6)";
-    ctx.shadowBlur = 8;
+    ctx.save();
+    ctx.shadowColor = "rgba(255,210,80,0.7)";
+    ctx.shadowBlur = 9;
     ctx.beginPath();
     ctx.arc(contactR * Math.cos(phi), contactR * Math.sin(phi), 3.5, 0, TWO_PI);
-    ctx.fillStyle = "rgba(255,218,80,0.95)";
+    ctx.fillStyle = "rgba(255,220,70,0.95)";
     ctx.fill();
-    ctx.shadowBlur = 0;
+    ctx.restore();
 
-    // Moving gear center dot
-    ctx.beginPath();
-    ctx.arc(mcxS, mcyS, 2.5, 0, TWO_PI);
-    ctx.fillStyle = "rgba(100,230,210,0.75)";
-    ctx.fill();
+    // ── Pen arm + active hole highlight + ink dot ─────────────────────────
+    const penRpx  = curPenOffset * movingR;
+    const penDotX = mcxS + penRpx * Math.cos(rotAngle);
+    const penDotY = mcyS + penRpx * Math.sin(rotAngle);
 
-    // Pen dot + arm
-    const penAngle = phi - psi;
-    const penRpx = curPenOffset * movingR;
-    const penDotX = mcxS + penRpx * Math.cos(penAngle);
-    const penDotY = mcyS + penRpx * Math.sin(penAngle);
-
+    // Arm line
     ctx.beginPath();
     ctx.moveTo(mcxS, mcyS);
     ctx.lineTo(penDotX, penDotY);
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(255,255,255,0.18)";
+    ctx.lineWidth = 1.2;
     ctx.stroke();
 
-    ctx.shadowColor = curPenColor + "aa";
-    ctx.shadowBlur = 10;
+    // Ink dot (the pen)
+    ctx.save();
+    ctx.shadowColor = curPenColor + "cc";
+    ctx.shadowBlur = 14;
     ctx.beginPath();
-    ctx.arc(penDotX, penDotY, 3.5, 0, TWO_PI);
+    ctx.arc(penDotX, penDotY, 4.5, 0, TWO_PI);
     ctx.fillStyle = curPenColor;
     ctx.fill();
-    ctx.shadowBlur = 0;
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
 
     ctx.restore();
   }, []);
