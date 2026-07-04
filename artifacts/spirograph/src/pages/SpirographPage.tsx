@@ -799,6 +799,41 @@ export default function SpirographPage() {
   const handleMovingSides = useCallback((v: number)    => { setMovingSides(v); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, v, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
   const handlePenOffset   = useCallback((v: number)    => { setPenOffset(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, v); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Randomize handler ───────────────────────────────────────────────────────
+  const handleRandomize = useCallback(() => {
+    const shapes: GearShape[] = ["circle", "ellipse", "polygon"];
+    const rFShape  = shapes[Math.floor(Math.random() * shapes.length)];
+    const rFEcc    = parseFloat((0.05 + Math.random() * 0.80).toFixed(2));
+    const rFSides  = 3 + Math.floor(Math.random() * 6); // 3–8
+    const rMShape  = shapes[Math.floor(Math.random() * shapes.length)];
+    const rMEcc    = parseFloat((0.05 + Math.random() * 0.80).toFixed(2));
+    const rMSides  = 3 + Math.floor(Math.random() * 6); // 3–8
+    const rPenOff  = parseFloat((0.1 + Math.random() * 0.85).toFixed(2));
+
+    setFixedShape(rFShape);
+    setFixedEcc(rFEcc);
+    setFixedSides(rFSides);
+    setMovingShape(rMShape);
+    setMovingEcc(rMEcc);
+    setMovingSides(rMSides);
+    setPenOffset(rPenOff);
+
+    const gear = makeEffectiveGear(gearIdx, gearRatio);
+    rebuildTables(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode);
+    drawGhost(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode, rPenOff, penColor, penWeight);
+
+    // Auto-play
+    simRef.current.phi = 0;
+    hueRef.current = 0;
+    const startColor = rainbow ? "hsl(0,85%,62%)" : penColor;
+    const newRun: TraceRun = { points: [], color: startColor, weight: penWeight };
+    currentRunRef.current = newRun;
+    if (compositeMode) traceRunsRef.current.push(newRun);
+    else               traceRunsRef.current = [newRun];
+    setHasTrace(true);
+    setIsPlaying(true);
+  }, [gearIdx, gearRatio, meshMode, penColor, penWeight, rainbow, compositeMode, rebuildTables, drawGhost]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Gear ratio slider ────────────────────────────────────────────────────────
   const handleGearRatioInput = useCallback((v: number) => {
     setGearRatio(v);
@@ -884,6 +919,30 @@ export default function SpirographPage() {
               {meshMode === "internal" ? "Gear inside ring — hypocycloid"
                : meshMode === "external" ? "Gear orbits hub — epicycloid"
                : "Gear on straight bar — trochoid"}
+            </p>
+          </section>
+
+          <div className="border-t border-border/50" />
+
+          {/* ── Surprise Me ──────────────────────────────────────── */}
+          <section>
+            <button
+              onClick={handleRandomize}
+              disabled={isPlaying}
+              className={[
+                "w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold border transition-all",
+                isPlaying
+                  ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
+                  : "border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50 active:scale-95",
+              ].join(" ")}
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current" aria-hidden="true">
+                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+              </svg>
+              Surprise Me
+            </button>
+            <p className="text-[10px] text-muted-foreground/50 mt-1.5 leading-tight">
+              Randomizes both gear shapes, eccentricities &amp; pen offset, then draws.
             </p>
           </section>
 
