@@ -35,6 +35,17 @@ type GearPreset = (typeof GEAR_PRESETS)[number];
 const DEFAULT_GEAR_IDX = 4;
 const MAX_GEAR_R = GEAR_PRESETS[GEAR_PRESETS.length - 1].radius;
 
+// Build an effective gear object by overriding radius+teeth from a ratio value
+function makeEffectiveGear(
+  idx: number,
+  ratio: number // 0–100, percent of FIXED_BASE_R
+): GearPreset {
+  const base = GEAR_PRESETS[idx];
+  const r = Math.max(10, Math.round(FIXED_BASE_R * ratio / 100));
+  const t = Math.max(4, Math.round(FIXED_TEETH * ratio / 100));
+  return { ...base, radius: r, teeth: t } as GearPreset;
+}
+
 type SpeedMode = "partial" | "full" | "accelerated";
 const SPEED_DELTAS: Record<SpeedMode, number> = { partial: 0.005, full: 0.018, accelerated: 0.07 };
 
@@ -166,6 +177,8 @@ function GearShapeSection({ label, shape, ecc, sides, disabled,
 // ─── Main component ────────────────────────────────────────────────────────────
 export default function SpirographPage() {
   const [gearIdx,     setGearIdx]     = useState(DEFAULT_GEAR_IDX);
+  // Moving gear radius as % of FIXED_BASE_R (20–80). Default ≈ 55 matches Standard preset R85.
+  const [gearRatio,   setGearRatio]   = useState(55);
   const [meshMode,    setMeshMode]    = useState<MeshMode>("internal");
   const [fixedShape,  setFixedShape]  = useState<GearShape>("circle");
   const [fixedEcc,    setFixedEcc]    = useState(0.3);
@@ -648,12 +661,12 @@ export default function SpirographPage() {
   // ─── Rebuild when params change (idle) ───────────────────────────────────────
   useEffect(() => {
     if (!simRef.current.tablesReady) return;
-    const gear = GEAR_PRESETS[gearIdx];
+    const gear = makeEffectiveGear(gearIdx, gearRatio);
     rebuildTables(fixedShape, fixedEcc, fixedSides,
       movingShape, movingEcc, movingSides, gear, meshMode);
-    if (!isPlaying) drawIdle(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor);
-  }, [gearIdx, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!isPlaying) drawGhost(fixedShape, fixedEcc, fixedSides,
+      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor, penWeight);
+  }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Animation loop ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -663,7 +676,7 @@ export default function SpirographPage() {
     }
     const sim = simRef.current;
     const delta = SPEED_DELTAS[speed];
-    const capGear    = GEAR_PRESETS[gearIdx];
+    const capGear    = makeEffectiveGear(gearIdx, gearRatio);
     const capMode    = meshMode;
     const capFShape  = fixedShape;  const capFEcc  = fixedEcc;  const capFSides = fixedSides;
     const capMShape  = movingShape; const capMEcc  = movingEcc; const capMSides = movingSides;
@@ -725,7 +738,7 @@ export default function SpirographPage() {
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
-  }, [isPlaying, speed, gearIdx, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
+  }, [isPlaying, speed, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       penOffset, penColor, penWeight, rainbow, compositeMode, getCanvasSize, renderFrame]);
 
   // ─── Canvas resize ───────────────────────────────────────────────────────────
@@ -739,12 +752,12 @@ export default function SpirographPage() {
       if (canvas.width === size && canvas.height === size) return;
       canvas.width = size; canvas.height = size;
       if (!isPlaying) drawIdle(fixedShape, fixedEcc, fixedSides,
-        movingShape, movingEcc, movingSides, GEAR_PRESETS[gearIdx], meshMode, penOffset, penColor);
+        movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, penOffset, penColor);
     });
     const parent = canvasRef.current?.parentElement;
     if (parent) ro.observe(parent);
     return () => ro.disconnect();
-  }, [isPlaying, gearIdx, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
+  }, [isPlaying, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       penOffset, penColor, drawIdle]);
 
   // ─── Shared param helper ─────────────────────────────────────────────────────
@@ -758,7 +771,7 @@ export default function SpirographPage() {
     drawGhost(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, pOff, penColor, penWeight);
   }, [isPlaying, penColor, penWeight, rebuildTables, drawGhost]);
 
-  const g   = () => GEAR_PRESETS[gearIdx];
+  const g   = () => makeEffectiveGear(gearIdx, gearRatio);
   const cur = () => ({ fShape: fixedShape, fEcc: fixedEcc, fSides: fixedSides,
                        mShape: movingShape, mEcc: movingEcc, mSides: movingSides,
                        gear: g(), mode: meshMode });
@@ -766,26 +779,35 @@ export default function SpirographPage() {
   // ─── Handlers ────────────────────────────────────────────────────────────────
   const handleGearSelect = useCallback((idx: number) => {
     setGearIdx(idx);
+    const presetRatio = Math.min(80, Math.max(20, Math.round((GEAR_PRESETS[idx].radius / FIXED_BASE_R) * 100)));
+    setGearRatio(presetRatio);
     const { fShape, fEcc, fSides, mShape, mEcc, mSides, mode } = cur();
-    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, GEAR_PRESETS[idx], mode, penOffset);
+    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, makeEffectiveGear(idx, presetRatio), mode, penOffset);
   }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleMeshMode = useCallback((mode: MeshMode) => {
     setMeshMode(mode);
     const { fShape, fEcc, fSides, mShape, mEcc, mSides, gear } = cur();
     if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, penOffset);
-  }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleFixedShape  = useCallback((s: GearShape) => { setFixedShape(s);  const c = cur(); applyGearParams(s, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleFixedEcc    = useCallback((v: number)    => { setFixedEcc(v);    const c = cur(); applyGearParams(c.fShape, v, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedSides, movingShape, movingEcc, movingSides, gearIdx, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleFixedSides  = useCallback((v: number)    => { setFixedSides(v);  const c = cur(); applyGearParams(c.fShape, c.fEcc, v, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, movingShape, movingEcc, movingSides, gearIdx, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleMovingShape = useCallback((s: GearShape) => { setMovingShape(s); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, s, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingEcc, movingSides, gearIdx, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleMovingEcc   = useCallback((v: number)    => { setMovingEcc(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, v, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingSides, gearIdx, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handleMovingSides = useCallback((v: number)    => { setMovingSides(v); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, v, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, gearIdx, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
-  const handlePenOffset   = useCallback((v: number)    => { setPenOffset(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, v); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, meshMode, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleFixedShape  = useCallback((s: GearShape) => { setFixedShape(s);  const c = cur(); applyGearParams(s, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleFixedEcc    = useCallback((v: number)    => { setFixedEcc(v);    const c = cur(); applyGearParams(c.fShape, v, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleFixedSides  = useCallback((v: number)    => { setFixedSides(v);  const c = cur(); applyGearParams(c.fShape, c.fEcc, v, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMovingShape = useCallback((s: GearShape) => { setMovingShape(s); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, s, c.mEcc, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingEcc, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMovingEcc   = useCallback((v: number)    => { setMovingEcc(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, v, c.mSides, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingSides, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handleMovingSides = useCallback((v: number)    => { setMovingSides(v); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, v, c.gear, c.mode, penOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, gearIdx, gearRatio, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+  const handlePenOffset   = useCallback((v: number)    => { setPenOffset(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, v); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Gear ratio slider ────────────────────────────────────────────────────────
+  const handleGearRatioInput = useCallback((v: number) => {
+    setGearRatio(v);
+    const c = cur();
+    if (!isPlaying) applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, makeEffectiveGear(gearIdx, v), c.mode, penOffset);
+  }, [isPlaying, gearIdx, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, meshMode, penOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const startPlay = useCallback(() => {
-    const gear = GEAR_PRESETS[gearIdx];
+    const gear = makeEffectiveGear(gearIdx, gearRatio);
     rebuildTables(fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gear, meshMode);
     simRef.current.phi = 0;
     hueRef.current = 0;
@@ -796,7 +818,7 @@ export default function SpirographPage() {
     else               traceRunsRef.current = [newRun];
     setHasTrace(true);
     setIsPlaying(true);
-  }, [gearIdx, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
+  }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       penColor, penWeight, rainbow, compositeMode, rebuildTables]);
 
   const stopPlay = useCallback(() => setIsPlaying(false), []);
@@ -805,13 +827,13 @@ export default function SpirographPage() {
     stopPlay();
     traceRunsRef.current = []; currentRunRef.current = null;
     setHasTrace(false);
-    const gear = GEAR_PRESETS[gearIdx];
     setTimeout(() => drawIdle(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor), 0);
-  }, [stopPlay, gearIdx, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
+      movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, penOffset, penColor), 0);
+  }, [stopPlay, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       penOffset, penColor, drawIdle]);
 
   const selectedGear = GEAR_PRESETS[gearIdx];
+  const computedGear = makeEffectiveGear(gearIdx, gearRatio);
 
   const MESH_OPTIONS: { mode: MeshMode; label: string; title: string }[] = [
     { mode: "internal", label: "Ring",   title: "Hypocycloid — gear inside the ring" },
@@ -887,7 +909,24 @@ export default function SpirographPage() {
               </div>
             </div>
             <p className="text-[10px] text-muted-foreground/60 mt-1.5">
-              {selectedGear.teeth}T · {selectedGear.name} · R{selectedGear.radius}
+              {selectedGear.teeth}T · {selectedGear.name} · color preset
+            </p>
+          </section>
+
+          {/* ── Gear Ratio ────────────────────────────────────────────── */}
+          <section className="flex flex-col gap-1.5">
+            <ControlSlider
+              label="Gear Ratio"
+              value={gearRatio}
+              min={20}
+              max={80}
+              step={1}
+              onChange={handleGearRatioInput}
+              onInput={handleGearRatioInput}
+              display={(v) => `${v}% · R${computedGear.radius}`}
+            />
+            <p className="text-[10px] text-muted-foreground/60">
+              Moving gear as % of outer ring · small = fine detail, ~65% = epicycloid
             </p>
           </section>
 
