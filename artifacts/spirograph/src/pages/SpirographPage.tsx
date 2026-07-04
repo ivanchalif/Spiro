@@ -87,6 +87,21 @@ function computeNestedGear(
   };
 }
 
+// ─── Closure period helper ────────────────────────────────────────────────────
+// Given arc-length ratio = fixedArc/movingArc, find the denominator q such that
+// the spirograph closes after exactly q full phi-cycles (2π each).
+// Uses best-rational-approximation (Stern-Brocot / continued fraction).
+function closureLoops(ratio: number, maxQ = 300): number {
+  let bestQ = 1, bestErr = Infinity;
+  for (let q = 1; q <= maxQ; q++) {
+    const p = Math.round(ratio * q);
+    const err = Math.abs(ratio - p / q);
+    if (err < bestErr) { bestErr = err; bestQ = q; }
+    if (bestErr < 5e-4) break; // good enough — stop early
+  }
+  return bestQ;
+}
+
 // ─── Scale helper ─────────────────────────────────────────────────────────────
 function computeScale(mode: MeshMode, gear: GearPreset, canvasSize: number): number {
   if (mode === "rack") {
@@ -741,12 +756,11 @@ export default function SpirographPage() {
 
     const ft = sim.fixedTable, mt = sim.movingTable;
     const ratio = totalArcLength(ft) / totalArcLength(mt);
-    // When nested, we need more phi to close: multiply by nestedN
-    const baseLoops = Math.max(8, Math.ceil(ratio) * 2);
+    const baseLoops = closureLoops(ratio);
     const totalPhi = mode === "rack"
       ? RACK_MAX_PHI
       : TWO_PI * (nestedOn ? baseLoops * nestedN : baseLoops);
-    const numSteps = nestedOn ? Math.min(1200, 500 * nestedN) : 500;
+    const numSteps = nestedOn ? Math.min(2000, 800 * nestedN) : Math.min(2000, baseLoops * 60);
 
     const phi0 = mode === "rack" ? sim.rackOffX / gear.radius : 0;
     const state0 = computeMeshState(
@@ -832,7 +846,7 @@ export default function SpirographPage() {
     const capND      = nestedPenOffset;
 
     const ratio  = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
-    const baseLoops = Math.max(10, Math.ceil(ratio) * 3);
+    const baseLoops = closureLoops(ratio);
     const maxPhi = capMode === "rack"
       ? RACK_MAX_PHI
       : TWO_PI * (capNested ? baseLoops * capNN : baseLoops);
