@@ -138,18 +138,68 @@ function ControlSlider({
   );
 }
 
-const SHAPE_LABELS: Record<GearShape, string> = {
-  circle:  "Circle",
-  ellipse: "Ellipse",
-  polygon: "Polygon / Star",
-};
+// ─── Per-gear shape + eccentricity section ────────────────────────────────────
+interface GearShapeSectionProps {
+  label: string;
+  shape: GearShape;
+  ecc: number;
+  onShapeChange: (s: GearShape) => void;
+  onEccChange: (v: number) => void;
+  onEccInput: (v: number) => void;
+  disabled?: boolean;
+}
 
-// ─── Main component ────────────────────────────────────────────────────────────
+function GearShapeSection({
+  label, shape, ecc, onShapeChange, onEccChange, onEccInput, disabled,
+}: GearShapeSectionProps) {
+  const shapes: GearShape[] = ["circle", "ellipse", "polygon"];
+  const shapeLabel: Record<GearShape, string> = {
+    circle: "Circle",
+    ellipse: "Ellipse",
+    polygon: "Polygon",
+  };
+  return (
+    <section className="flex flex-col gap-2">
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</p>
+      <div className="flex gap-1">
+        {shapes.map((s) => (
+          <button key={s} onClick={() => onShapeChange(s)} disabled={disabled}
+            className={["px-2 py-1 rounded text-[10px] font-medium flex-1 border transition-all",
+              shape === s
+                ? "bg-primary/14 text-primary border-primary/25"
+                : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+              disabled ? "opacity-40 cursor-not-allowed" : "",
+            ].join(" ")}>
+            {shapeLabel[s]}
+          </button>
+        ))}
+      </div>
+      {shape !== "circle" && (
+        <div>
+          <ControlSlider
+            label={shape === "ellipse" ? "Eccentricity" : "Star Depth"}
+            value={ecc} min={0.05} max={0.85} step={0.01}
+            onChange={onEccChange}
+            onInput={onEccInput}
+            display={(v) => v.toFixed(2)}
+          />
+          <p className="text-[10px] text-muted-foreground/60 mt-1">
+            {shape === "ellipse"
+              ? "Oval stretch — higher = more elongated."
+              : "Star depth — higher = sharper points."}
+          </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function SpirographPage() {
   const [gearIdx,    setGearIdx]    = useState(DEFAULT_GEAR_IDX);
   const [fixedShape, setFixedShape] = useState<GearShape>("circle");
+  const [fixedEcc,   setFixedEcc]   = useState(0.3);
   const [movingShape,setMovingShape]= useState<GearShape>("circle");
-  const [ecc,        setEcc]        = useState(0.3);
+  const [movingEcc,  setMovingEcc]  = useState(0.3);
   const [penOffset,  setPenOffset]  = useState(0.65);
   const [penWeight,  setPenWeight]  = useState(2);
   const [penColor,   setPenColor]   = useState("#60a5fa"); // matches Standard gear color
@@ -166,8 +216,9 @@ export default function SpirographPage() {
     fixedTable:  new Float64Array(TABLE_N + 1) as Float64Array<ArrayBuffer>,
     movingTable: new Float64Array(TABLE_N + 1) as Float64Array<ArrayBuffer>,
     fixedShape:  "circle"  as GearShape,
+    fixedEcc:    0.3,
     movingShape: "circle"  as GearShape,
-    ecc: 0.3,
+    movingEcc:   0.3,
     gear: GEAR_PRESETS[DEFAULT_GEAR_IDX] as GearPreset,
     tablesReady: false,
   });
@@ -178,13 +229,18 @@ export default function SpirographPage() {
   const hueRef         = useRef(0);
 
   // ─── Arc-length table builder ───────────────────────────────────────────
-  const rebuildTables = useCallback((fs: GearShape, ms: GearShape, e: number, gear: GearPreset) => {
-    simRef.current.fixedTable  = buildArcLengthTable(fs, FIXED_BASE_R,   e, TABLE_N, POLYGON_SIDES);
-    simRef.current.movingTable = buildArcLengthTable(ms, gear.radius,     e, TABLE_N, POLYGON_SIDES);
-    simRef.current.fixedShape  = fs;
-    simRef.current.movingShape = ms;
-    simRef.current.ecc  = e;
-    simRef.current.gear = gear;
+  const rebuildTables = useCallback((
+    fShape: GearShape, fEcc: number,
+    mShape: GearShape, mEcc: number,
+    gear: GearPreset,
+  ) => {
+    simRef.current.fixedTable  = buildArcLengthTable(fShape, FIXED_BASE_R,  fEcc, TABLE_N, POLYGON_SIDES);
+    simRef.current.movingTable = buildArcLengthTable(mShape, gear.radius,   mEcc, TABLE_N, POLYGON_SIDES);
+    simRef.current.fixedShape  = fShape;
+    simRef.current.fixedEcc    = fEcc;
+    simRef.current.movingShape = mShape;
+    simRef.current.movingEcc   = mEcc;
+    simRef.current.gear        = gear;
     simRef.current.tablesReady = true;
   }, []);
 
@@ -206,17 +262,15 @@ export default function SpirographPage() {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
-    const W = canvas.width;
-    const H = canvas.height;
-    const cx = W / 2;
-    const cy = H / 2;
     const sim = simRef.current;
     const gear = sim.gear;
 
+    const W = canvas.width, H = canvas.height;
+    const cx = W / 2, cy = H / 2;
+
     ctx.clearRect(0, 0, W, H);
 
-    // ── Trace runs ────────────────────────────────────────────────────
+    // ── Existing trace runs ────────────────────────────────────────────
     for (const run of traceRunsRef.current) {
       if (run.points.length < 2) continue;
       ctx.save();
@@ -224,7 +278,6 @@ export default function SpirographPage() {
       ctx.lineWidth = run.weight;
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.globalAlpha = 0.9;
       ctx.beginPath();
       for (let i = 0; i < run.points.length; i++) {
         const px = cx + run.points[i].x * scale;
@@ -260,14 +313,14 @@ export default function SpirographPage() {
     ctx.beginPath();
     for (let i = 0; i <= fixedSamples; i++) {
       const t = (i / fixedSamples) * TWO_PI;
-      const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.ecc, t, POLYGON_SIDES);
+      const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.fixedEcc, t, POLYGON_SIDES);
       if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
       else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
     }
     ctx.closePath();
     for (let i = 0; i <= fixedSamples; i++) {
       const t = (i / fixedSamples) * TWO_PI;
-      const base = gearRadius(sim.fixedShape, fixedR, sim.ecc, t, POLYGON_SIDES);
+      const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, POLYGON_SIDES);
       const r = base - toothH * 0.5 * (1 - Math.cos(t * FIXED_TEETH));
       if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
       else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
@@ -281,13 +334,13 @@ export default function SpirographPage() {
     ctx.beginPath();
     for (let i = 0; i <= fixedSamples; i++) {
       const t = (i / fixedSamples) * TWO_PI;
-      const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.ecc, t, POLYGON_SIDES);
+      const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.fixedEcc, t, POLYGON_SIDES);
       if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
       else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
     }
     ctx.closePath();
-    ctx.strokeStyle = "rgba(170, 185, 230, 0.30)";
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = "rgba(180, 195, 240, 0.30)";
+    ctx.lineWidth = 1;
     ctx.stroke();
     ctx.restore();
 
@@ -298,7 +351,7 @@ export default function SpirographPage() {
     ctx.beginPath();
     for (let i = 0; i <= fixedSamples; i++) {
       const t = (i / fixedSamples) * TWO_PI;
-      const base = gearRadius(sim.fixedShape, fixedR, sim.ecc, t, POLYGON_SIDES);
+      const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, POLYGON_SIDES);
       const r = base - toothH * 0.5 * (1 - Math.cos(t * FIXED_TEETH));
       if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
       else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
@@ -320,7 +373,7 @@ export default function SpirographPage() {
     ctx.beginPath();
     for (let i = 0; i <= movingSamples; i++) {
       const la = (i / movingSamples) * TWO_PI;
-      const base = gearRadius(sim.movingShape, movingR, sim.ecc, la, POLYGON_SIDES);
+      const base = gearRadius(sim.movingShape, movingR, sim.movingEcc, la, POLYGON_SIDES);
       // π phase-offset → peaks interleave with ring valleys
       const r = base + toothH * 0.5 * (1 - Math.cos(la * movingTeeth + Math.PI));
       const wa = la + rotAngle;
@@ -396,7 +449,7 @@ export default function SpirographPage() {
     ctx.stroke();
 
     // Contact point (gold)
-    const contactR = gearRadius(sim.fixedShape, fixedR, sim.ecc, phi, POLYGON_SIDES);
+    const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, POLYGON_SIDES);
     ctx.save();
     ctx.shadowColor = "rgba(255,210,80,0.7)";
     ctx.shadowBlur = 9;
@@ -433,14 +486,17 @@ export default function SpirographPage() {
 
   // ─── Draw idle ──────────────────────────────────────────────────────────
   const drawIdle = useCallback((
-    fs: GearShape, ms: GearShape, e: number, gear: GearPreset, pOff: number, color: string
+    fShape: GearShape, fEcc: number,
+    mShape: GearShape, mEcc: number,
+    gear: GearPreset,
+    pOff: number, color: string,
   ) => {
     const sim = simRef.current;
     if (!sim.tablesReady) return;
     const scale = getCanvasSize() / 380;
     const state = computeMeshState(
-      0, fs, FIXED_BASE_R, e, sim.fixedTable,
-      ms, gear.radius, e, sim.movingTable,
+      0, fShape, FIXED_BASE_R, fEcc, sim.fixedTable,
+      mShape, gear.radius, mEcc, sim.movingTable,
       pOff, POLYGON_SIDES
     );
     renderFrame(0, state.psi, state.movingCenterX, state.movingCenterY, state.penX, state.penY, scale, color, pOff);
@@ -448,7 +504,10 @@ export default function SpirographPage() {
 
   // ─── Ghost trace ────────────────────────────────────────────────────────
   const drawGhost = useCallback((
-    fs: GearShape, ms: GearShape, e: number, gear: GearPreset, pOff: number, color: string, weight: number
+    fShape: GearShape, fEcc: number,
+    mShape: GearShape, mEcc: number,
+    gear: GearPreset,
+    pOff: number, color: string, weight: number,
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -466,7 +525,7 @@ export default function SpirographPage() {
     const totalPhi = TWO_PI * Math.max(8, Math.ceil(ratio) * 2);
     const numSteps = 500;
 
-    const state0 = computeMeshState(0, fs, FIXED_BASE_R, e, ft, ms, gear.radius, e, mt, pOff, POLYGON_SIDES);
+    const state0 = computeMeshState(0, fShape, FIXED_BASE_R, fEcc, ft, mShape, gear.radius, mEcc, mt, pOff, POLYGON_SIDES);
     renderFrame(0, state0.psi, state0.movingCenterX, state0.movingCenterY, state0.penX, state0.penY, scale, color, pOff);
 
     ctx.save();
@@ -478,7 +537,7 @@ export default function SpirographPage() {
     ctx.beginPath();
     for (let i = 0; i <= numSteps; i++) {
       const ph = (i / numSteps) * totalPhi;
-      const st = computeMeshState(ph, fs, FIXED_BASE_R, e, ft, ms, gear.radius, e, mt, pOff, POLYGON_SIDES);
+      const st = computeMeshState(ph, fShape, FIXED_BASE_R, fEcc, ft, mShape, gear.radius, mEcc, mt, pOff, POLYGON_SIDES);
       if (i === 0) ctx.moveTo(cx + st.penX * scale, cy + st.penY * scale);
       else         ctx.lineTo(cx + st.penX * scale, cy + st.penY * scale);
     }
@@ -488,16 +547,16 @@ export default function SpirographPage() {
 
   // ─── Initial setup ──────────────────────────────────────────────────────
   useEffect(() => {
-    rebuildTables(fixedShape, movingShape, ecc, GEAR_PRESETS[DEFAULT_GEAR_IDX]);
+    rebuildTables(fixedShape, fixedEcc, movingShape, movingEcc, GEAR_PRESETS[DEFAULT_GEAR_IDX]);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Rebuild when key params change (idle only) ─────────────────────────
   useEffect(() => {
     if (!simRef.current.tablesReady) return;
     const gear = GEAR_PRESETS[gearIdx];
-    rebuildTables(fixedShape, movingShape, ecc, gear);
-    if (!isPlaying) drawIdle(fixedShape, movingShape, ecc, gear, penOffset, penColor);
-  }, [gearIdx, fixedShape, movingShape, ecc]); // eslint-disable-line react-hooks/exhaustive-deps
+    rebuildTables(fixedShape, fixedEcc, movingShape, movingEcc, gear);
+    if (!isPlaying) drawIdle(fixedShape, fixedEcc, movingShape, movingEcc, gear, penOffset, penColor);
+  }, [gearIdx, fixedShape, fixedEcc, movingShape, movingEcc]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Animation loop ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -508,10 +567,16 @@ export default function SpirographPage() {
 
     const sim = simRef.current;
     const delta = SPEED_DELTAS[speed];
-    const capFS = fixedShape, capMS = movingShape, capEcc = ecc;
-    const capGear = GEAR_PRESETS[gearIdx];
-    const capPenOffset = penOffset, capColor = penColor, capWeight = penWeight;
+    const capGear    = GEAR_PRESETS[gearIdx];
+    const capFShape  = fixedShape;
+    const capFEcc    = fixedEcc;
+    const capMShape  = movingShape;
+    const capMEcc    = movingEcc;
+    const capPenOffset = penOffset;
+    const capColor   = penColor;
+    const capWeight  = penWeight;
     const capRainbow = rainbow;
+    const capComposite = compositeMode;
 
     const ratio = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
     const maxPhi = TWO_PI * Math.max(10, Math.ceil(ratio) * 3);
@@ -522,8 +587,8 @@ export default function SpirographPage() {
       const scale = getCanvasSize() / 380;
       const state = computeMeshState(
         sim.phi,
-        capFS, FIXED_BASE_R, capEcc, sim.fixedTable,
-        capMS, capGear.radius, capEcc, sim.movingTable,
+        capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable,
+        capMShape, capGear.radius, capMEcc, sim.movingTable,
         capPenOffset, POLYGON_SIDES
       );
 
@@ -553,13 +618,26 @@ export default function SpirographPage() {
 
       sim.phi += delta;
       frameCount++;
-      if (sim.phi >= maxPhi) { setIsPlaying(false); return; }
+
+      if (sim.phi >= maxPhi) {
+        if (capComposite) {
+          // Composite mode: loop — start a new trace run on top
+          sim.phi = 0;
+          const newRun: TraceRun = { points: [], color: frameColor, weight: capWeight };
+          traceRunsRef.current.push(newRun);
+          currentRunRef.current = newRun;
+        } else {
+          setIsPlaying(false);
+          return;
+        }
+      }
+
       rafRef.current = requestAnimationFrame(loop);
     };
 
     rafRef.current = requestAnimationFrame(loop);
     return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
-  }, [isPlaying, speed, gearIdx, fixedShape, movingShape, ecc, penOffset, penColor, penWeight, rainbow, getCanvasSize, renderFrame]);
+  }, [isPlaying, speed, gearIdx, fixedShape, fixedEcc, movingShape, movingEcc, penOffset, penColor, penWeight, rainbow, compositeMode, getCanvasSize, renderFrame]);
 
   // ─── Canvas resize ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -572,17 +650,89 @@ export default function SpirographPage() {
       if (canvas.width === size && canvas.height === size) return;
       canvas.width = size;
       canvas.height = size;
-      if (!isPlaying) drawIdle(fixedShape, movingShape, ecc, GEAR_PRESETS[gearIdx], penOffset, penColor);
+      if (!isPlaying) drawIdle(fixedShape, fixedEcc, movingShape, movingEcc, GEAR_PRESETS[gearIdx], penOffset, penColor);
     });
     const parent = canvasRef.current?.parentElement;
     if (parent) ro.observe(parent);
     return () => ro.disconnect();
-  }, [isPlaying, gearIdx, fixedShape, movingShape, ecc, penOffset, penColor, drawIdle]);
+  }, [isPlaying, gearIdx, fixedShape, fixedEcc, movingShape, movingEcc, penOffset, penColor, drawIdle]);
 
-  // ─── Handlers ────────────────────────────────────────────────────────────
+  // ─── Shared helper: update tables + redraw preview ───────────────────────
+  const applyGearParams = useCallback(
+    (fShape: GearShape, fEcc: number, mShape: GearShape, mEcc: number, gear: GearPreset, pOff: number) => {
+      if (isPlaying) return;
+      const ft = buildArcLengthTable(fShape, FIXED_BASE_R, fEcc, TABLE_N, POLYGON_SIDES);
+      const mt = buildArcLengthTable(mShape, gear.radius,  mEcc, TABLE_N, POLYGON_SIDES);
+      simRef.current.fixedTable  = ft;
+      simRef.current.movingTable = mt;
+      simRef.current.fixedShape  = fShape;
+      simRef.current.fixedEcc    = fEcc;
+      simRef.current.movingShape = mShape;
+      simRef.current.movingEcc   = mEcc;
+      simRef.current.tablesReady = true;
+      drawGhost(fShape, fEcc, mShape, mEcc, gear, pOff, penColor, penWeight);
+    },
+    [isPlaying, penColor, penWeight, drawGhost]
+  );
+
+  // ─── Gear selection ──────────────────────────────────────────────────────
+  const handleGearSelect = useCallback((idx: number) => {
+    setGearIdx(idx);
+    if (!isPlaying) {
+      const gear = GEAR_PRESETS[idx];
+      const mt = buildArcLengthTable(movingShape, gear.radius, movingEcc, TABLE_N, POLYGON_SIDES);
+      simRef.current.movingTable = mt;
+      simRef.current.gear = gear;
+      simRef.current.tablesReady = true;
+      drawGhost(fixedShape, fixedEcc, movingShape, movingEcc, gear, penOffset, penColor, penWeight);
+    }
+  }, [isPlaying, fixedShape, fixedEcc, movingShape, movingEcc, penOffset, penColor, penWeight, drawGhost]);
+
+  // ─── Per-gear shape / ecc handlers ───────────────────────────────────────
+  const handleFixedShapeChange = useCallback(
+    (s: GearShape) => {
+      setFixedShape(s);
+      applyGearParams(s, fixedEcc, movingShape, movingEcc, GEAR_PRESETS[gearIdx], penOffset);
+    },
+    [fixedEcc, movingShape, movingEcc, gearIdx, penOffset, applyGearParams]
+  );
+
+  const handleFixedEccChange = useCallback(
+    (v: number) => {
+      setFixedEcc(v);
+      applyGearParams(fixedShape, v, movingShape, movingEcc, GEAR_PRESETS[gearIdx], penOffset);
+    },
+    [fixedShape, movingShape, movingEcc, gearIdx, penOffset, applyGearParams]
+  );
+
+  const handleMovingShapeChange = useCallback(
+    (s: GearShape) => {
+      setMovingShape(s);
+      applyGearParams(fixedShape, fixedEcc, s, movingEcc, GEAR_PRESETS[gearIdx], penOffset);
+    },
+    [fixedShape, fixedEcc, movingEcc, gearIdx, penOffset, applyGearParams]
+  );
+
+  const handleMovingEccChange = useCallback(
+    (v: number) => {
+      setMovingEcc(v);
+      applyGearParams(fixedShape, fixedEcc, movingShape, v, GEAR_PRESETS[gearIdx], penOffset);
+    },
+    [fixedShape, fixedEcc, movingShape, gearIdx, penOffset, applyGearParams]
+  );
+
+  const handlePenOffsetInput = useCallback(
+    (v: number) => {
+      setPenOffset(v);
+      applyGearParams(fixedShape, fixedEcc, movingShape, movingEcc, GEAR_PRESETS[gearIdx], v);
+    },
+    [fixedShape, fixedEcc, movingShape, movingEcc, gearIdx, applyGearParams]
+  );
+
+  // ─── Playback handlers ───────────────────────────────────────────────────
   const startPlay = useCallback(() => {
     const gear = GEAR_PRESETS[gearIdx];
-    rebuildTables(fixedShape, movingShape, ecc, gear);
+    rebuildTables(fixedShape, fixedEcc, movingShape, movingEcc, gear);
     simRef.current.phi = 0;
     hueRef.current = 0;
 
@@ -594,7 +744,7 @@ export default function SpirographPage() {
 
     setHasTrace(true);
     setIsPlaying(true);
-  }, [gearIdx, fixedShape, movingShape, ecc, penColor, penWeight, rainbow, compositeMode, rebuildTables]);
+  }, [gearIdx, fixedShape, fixedEcc, movingShape, movingEcc, penColor, penWeight, rainbow, compositeMode, rebuildTables]);
 
   const stopPlay = useCallback(() => setIsPlaying(false), []);
 
@@ -603,58 +753,10 @@ export default function SpirographPage() {
     traceRunsRef.current = [];
     currentRunRef.current = null;
     setHasTrace(false);
-    setTimeout(() => drawIdle(fixedShape, movingShape, ecc, GEAR_PRESETS[gearIdx], penOffset, penColor), 0);
-  }, [stopPlay, gearIdx, fixedShape, movingShape, ecc, penOffset, penColor, drawIdle]);
-
-  const handleGearSelect = useCallback((idx: number) => {
-    setGearIdx(idx);
-    if (!isPlaying) {
-      const gear = GEAR_PRESETS[idx];
-      const mt = buildArcLengthTable(movingShape, gear.radius, ecc, TABLE_N, POLYGON_SIDES);
-      simRef.current.movingTable = mt;
-      simRef.current.gear = gear;
-      simRef.current.tablesReady = true;
-      drawGhost(fixedShape, movingShape, ecc, gear, penOffset, penColor, penWeight);
-    }
-  }, [isPlaying, fixedShape, movingShape, ecc, penOffset, penColor, penWeight, drawGhost]);
-
-  const handleFixedShapeChange = useCallback((s: GearShape) => {
-    setFixedShape(s);
-    if (!isPlaying) {
-      const ft = buildArcLengthTable(s, FIXED_BASE_R, ecc, TABLE_N, POLYGON_SIDES);
-      simRef.current.fixedTable = ft;
-      simRef.current.fixedShape = s;
-      simRef.current.tablesReady = true;
-      drawGhost(s, movingShape, ecc, GEAR_PRESETS[gearIdx], penOffset, penColor, penWeight);
-    }
-  }, [isPlaying, gearIdx, movingShape, ecc, penOffset, penColor, penWeight, drawGhost]);
-
-  const handleMovingShapeChange = useCallback((s: GearShape) => {
-    setMovingShape(s);
-    if (!isPlaying) {
-      const gear = GEAR_PRESETS[gearIdx];
-      const mt = buildArcLengthTable(s, gear.radius, ecc, TABLE_N, POLYGON_SIDES);
-      simRef.current.movingTable = mt;
-      simRef.current.movingShape = s;
-      simRef.current.tablesReady = true;
-      drawGhost(fixedShape, s, ecc, gear, penOffset, penColor, penWeight);
-    }
-  }, [isPlaying, gearIdx, fixedShape, ecc, penOffset, penColor, penWeight, drawGhost]);
-
-  const handleParamInput = useCallback((e: number, pOff: number) => {
-    if (isPlaying) return;
-    const gear = GEAR_PRESETS[gearIdx];
-    const ft = buildArcLengthTable(fixedShape, FIXED_BASE_R,  e, TABLE_N, POLYGON_SIDES);
-    const mt = buildArcLengthTable(movingShape, gear.radius, e, TABLE_N, POLYGON_SIDES);
-    simRef.current.fixedTable  = ft;
-    simRef.current.movingTable = mt;
-    simRef.current.ecc = e;
-    simRef.current.tablesReady = true;
-    drawGhost(fixedShape, movingShape, e, gear, pOff, penColor, penWeight);
-  }, [isPlaying, gearIdx, fixedShape, movingShape, penColor, penWeight, drawGhost]);
+    setTimeout(() => drawIdle(fixedShape, fixedEcc, movingShape, movingEcc, GEAR_PRESETS[gearIdx], penOffset, penColor), 0);
+  }, [stopPlay, gearIdx, fixedShape, fixedEcc, movingShape, movingEcc, penOffset, penColor, drawIdle]);
 
   const selectedGear = GEAR_PRESETS[gearIdx];
-  const showEcc = fixedShape !== "circle" || movingShape !== "circle";
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-background">
@@ -679,7 +781,7 @@ export default function SpirographPage() {
           </div>
         </div>
 
-        <div className="flex flex-col gap-4 px-4 py-4 flex-1">
+        <div className="flex flex-col gap-5 px-4 py-5 flex-1">
 
           {/* ── Gear Tray ─────────────────────────────────────────────── */}
           <section>
@@ -716,61 +818,50 @@ export default function SpirographPage() {
 
           <div className="border-t border-border/50" />
 
-          {/* ── NCG Shapes ──────────────────────────────────────────────── */}
-          <section className="flex flex-col gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Ring Shape</p>
-            <div className="flex gap-1">
-              {(["circle", "ellipse", "polygon"] as GearShape[]).map((s) => (
-                <button key={s} onClick={() => handleFixedShapeChange(s)}
-                  className={["px-2 py-1 rounded text-[10px] font-medium flex-1 border transition-all",
-                    fixedShape === s
-                      ? "bg-primary/14 text-primary border-primary/25"
-                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50"
-                  ].join(" ")}>
-                  {SHAPE_LABELS[s].split(" ")[0]}
-                </button>
-              ))}
+          {/* ── Outer Gear (fixed ring) shape ────────────────────────── */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-primary/60 shrink-0" />
+              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/70">Outer Gear</p>
             </div>
-          </section>
+            <GearShapeSection
+              label="Shape"
+              shape={fixedShape}
+              ecc={fixedEcc}
+              onShapeChange={handleFixedShapeChange}
+              onEccChange={handleFixedEccChange}
+              onEccInput={handleFixedEccChange}
+              disabled={isPlaying}
+            />
+          </div>
 
-          <section className="flex flex-col gap-2">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Gear Shape</p>
-            <div className="flex gap-1">
-              {(["circle", "ellipse", "polygon"] as GearShape[]).map((s) => (
-                <button key={s} onClick={() => handleMovingShapeChange(s)}
-                  className={["px-2 py-1 rounded text-[10px] font-medium flex-1 border transition-all",
-                    movingShape === s
-                      ? "bg-primary/14 text-primary border-primary/25"
-                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50"
-                  ].join(" ")}>
-                  {SHAPE_LABELS[s].split(" ")[0]}
-                </button>
-              ))}
+          <div className="h-px bg-border/50" />
+
+          {/* ── Inner Gear (moving) shape ─────────────────────────────── */}
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-teal-400/60 shrink-0" />
+              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/70">Inner Gear</p>
             </div>
-          </section>
+            <GearShapeSection
+              label="Shape"
+              shape={movingShape}
+              ecc={movingEcc}
+              onShapeChange={handleMovingShapeChange}
+              onEccChange={handleMovingEccChange}
+              onEccInput={handleMovingEccChange}
+              disabled={isPlaying}
+            />
+          </div>
 
-          {showEcc && (
-            <section>
-              <ControlSlider
-                label="Shape Depth" value={ecc} min={0.05} max={0.85} step={0.01}
-                onChange={(v) => setEcc(v)}
-                onInput={(v) => { setEcc(v); handleParamInput(v, penOffset); }}
-                display={(v) => v.toFixed(2)}
-              />
-            </section>
-          )}
-
-          <div className="border-t border-border/50" />
+          <div className="h-px bg-border/50" />
 
           {/* ── Pen controls ──────────────────────────────────────────── */}
           <section>
             <ControlSlider
               label="Pen Offset" value={penOffset} min={0.01} max={1} step={0.01}
               onChange={(v) => setPenOffset(v)}
-              onInput={(v) => {
-                setPenOffset(v);
-                handleParamInput(ecc, v);
-              }}
+              onInput={handlePenOffsetInput}
               display={(v) => `${Math.round(v * 100)}%`}
             />
             <p className="text-[10px] text-muted-foreground/60 mt-1">0% = gear center · 100% = edge</p>
