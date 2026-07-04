@@ -14,6 +14,8 @@ const FIXED_BASE_R = 155;
 const FIXED_TEETH  = 124;
 const TOOTH_SAMPLES = 18;
 const PEN_HOLES = [0.18, 0.32, 0.46, 0.60, 0.74, 0.88];
+// Colors assigned to rings 2–5 (ring 1 always uses the user's ink color)
+const MULTI_RING_COLORS = ["#f472b6", "#34d399", "#fbbf24", "#a78bfa"];
 const RAINBOW_HUE_STEP    = 2;
 const RAINBOW_CHUNK_FRAMES = 4;
 // Rack mode: 2 full gear rotations visible
@@ -187,6 +189,7 @@ export default function SpirographPage() {
   const [movingEcc,   setMovingEcc]   = useState(0.3);
   const [movingSides, setMovingSides] = useState(5);
   const [penOffset,   setPenOffset]   = useState(0.65);
+  const [penCount,    setPenCount]    = useState(1);
   const [penWeight,   setPenWeight]   = useState(2);
   const [penColor,    setPenColor]    = useState("#60a5fa");
   const [rainbow,     setRainbow]     = useState(false);
@@ -198,6 +201,8 @@ export default function SpirographPage() {
   const canvasRef     = useRef<HTMLCanvasElement>(null);
   const traceRunsRef  = useRef<TraceRun[]>([]);
   const currentRunRef = useRef<TraceRun | null>(null);
+  // Extra runs for rings 2–5 (index 0 = ring 2, etc.)
+  const extraRunsRef  = useRef<TraceRun[]>([]);
   const rafRef        = useRef<number | null>(null);
   const hueRef        = useRef(0);
 
@@ -251,6 +256,7 @@ export default function SpirographPage() {
     scale: number,
     curPenColor: string,
     curPenOffset: number,
+    extraPens?: { x: number; y: number; color: string }[],
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -553,7 +559,27 @@ export default function SpirographPage() {
     ctx.fillStyle = gear.color + "44"; ctx.fill();
     ctx.strokeStyle = gear.color + "bb"; ctx.lineWidth = 1; ctx.stroke();
 
-    // Pen arm + dot
+    // Extra pen arms + dots (rings 2–5)
+    if (extraPens && extraPens.length > 0) {
+      for (const ep of extraPens) {
+        const epxS = (ep.x - offX) * scale;
+        const epyS = (ep.y - offY) * scale;
+        ctx.beginPath();
+        ctx.moveTo(mcxS, mcyS);
+        ctx.lineTo(epxS, epyS);
+        ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
+        ctx.stroke();
+        ctx.save();
+        ctx.shadowColor = ep.color + "cc"; ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.arc(epxS, epyS, 3.5, 0, TWO_PI);
+        ctx.fillStyle = ep.color; ctx.fill();
+        ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = 0.9; ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // Primary pen arm + dot
     const penRpx  = curPenOffset * movingR;
     const penDotX = mcxS + penRpx * Math.cos(rotAngle);
     const penDotY = mcyS + penRpx * Math.sin(rotAngle);
@@ -600,6 +626,7 @@ export default function SpirographPage() {
     fShape: GearShape, fEcc: number, fSides: number,
     mShape: GearShape, mEcc: number, mSides: number,
     gear: GearPreset, mode: MeshMode, pOff: number, color: string, weight: number,
+    rings = 1,
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -630,25 +657,30 @@ export default function SpirographPage() {
     renderFrame(phi0, state0.psi, state0.movingCenterX, state0.movingCenterY,
       state0.penX, state0.penY, scale, color, pOff);
 
-    // Ghost trace overlay
-    ctx.save();
-    ctx.globalAlpha = 0.16;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = weight * 0.8;
-    ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.beginPath();
-    for (let i = 0; i <= numSteps; i++) {
-      const ph = (i / numSteps) * totalPhi;
-      const st = computeMeshState(
-        ph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
-        mShape, gear.radius, mEcc, mt, mSides, pOff, mode,
-      );
-      const px = cx + (st.penX - offX) * scale;
-      const py = cy + (st.penY - offY) * scale;
-      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    // Ghost trace overlays — one per ring (ring 0 is primary at pOff, others go inward)
+    const ghostColors = [color, ...MULTI_RING_COLORS];
+    for (let ri = 0; ri < rings; ri++) {
+      const ringOff = ri === 0 ? pOff : pOff * (rings - ri) / rings;
+      const ghostColor = ghostColors[ri % ghostColors.length];
+      ctx.save();
+      ctx.globalAlpha = 0.13;
+      ctx.strokeStyle = ghostColor;
+      ctx.lineWidth = weight * 0.8;
+      ctx.lineCap = "round"; ctx.lineJoin = "round";
+      ctx.beginPath();
+      for (let i = 0; i <= numSteps; i++) {
+        const ph = (i / numSteps) * totalPhi;
+        const st = computeMeshState(
+          ph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
+          mShape, gear.radius, mEcc, mt, mSides, ringOff, mode,
+        );
+        const px = cx + (st.penX - offX) * scale;
+        const py = cy + (st.penY - offY) * scale;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+      ctx.restore();
     }
-    ctx.stroke();
-    ctx.restore();
   }, [renderFrame]);
 
   // ─── Initial setup ───────────────────────────────────────────────────────────
@@ -665,7 +697,7 @@ export default function SpirographPage() {
     rebuildTables(fixedShape, fixedEcc, fixedSides,
       movingShape, movingEcc, movingSides, gear, meshMode);
     if (!isPlaying) drawGhost(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor, penWeight);
+      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor, penWeight, penCount);
   }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Animation loop ──────────────────────────────────────────────────────────
@@ -682,6 +714,7 @@ export default function SpirographPage() {
     const capMShape  = movingShape; const capMEcc  = movingEcc; const capMSides = movingSides;
     const capPen     = penOffset;   const capColor = penColor;  const capWeight = penWeight;
     const capRainbow = rainbow;     const capComposite = compositeMode;
+    const capRings   = penCount;
 
     const ratio  = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
     const maxPhi = capMode === "rack"
@@ -716,9 +749,24 @@ export default function SpirographPage() {
 
       currentRunRef.current?.points.push({ x: state.penX, y: state.penY });
 
+      // Extra rings (rings 2–5) — each at a closer offset, inward from the primary
+      const extraPens: { x: number; y: number; color: string }[] = [];
+      for (let ri = 0; ri < capRings - 1; ri++) {
+        const off = capPen * (capRings - 1 - ri) / capRings;
+        const st = computeMeshState(
+          sim.phi,
+          capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
+          capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
+          off, capMode,
+        );
+        const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
+        extraRunsRef.current[ri]?.points.push({ x: st.penX, y: st.penY });
+        extraPens.push({ x: st.penX, y: st.penY, color: ringColor });
+      }
+
       renderFrame(sim.phi, state.psi,
         state.movingCenterX, state.movingCenterY,
-        state.penX, state.penY, scale, frameColor, capPen);
+        state.penX, state.penY, scale, frameColor, capPen, extraPens);
 
       sim.phi += delta;
       frameCount++;
@@ -729,6 +777,13 @@ export default function SpirographPage() {
           const newRun: TraceRun = { points: [], color: frameColor, weight: capWeight };
           traceRunsRef.current.push(newRun);
           currentRunRef.current = newRun;
+          // Also cycle extra runs in composite mode
+          for (let ri = 0; ri < capRings - 1; ri++) {
+            const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
+            const extraRun: TraceRun = { points: [], color: ringColor, weight: capWeight };
+            extraRunsRef.current[ri] = extraRun;
+            traceRunsRef.current.push(extraRun);
+          }
         } else {
           setIsPlaying(false);
           return;
@@ -739,7 +794,7 @@ export default function SpirographPage() {
     rafRef.current = requestAnimationFrame(loop);
     return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
   }, [isPlaying, speed, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
-      penOffset, penColor, penWeight, rainbow, compositeMode, getCanvasSize, renderFrame]);
+      penOffset, penCount, penColor, penWeight, rainbow, compositeMode, getCanvasSize, renderFrame]);
 
   // ─── Canvas resize ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -768,8 +823,8 @@ export default function SpirographPage() {
   ) => {
     if (isPlaying) return;
     rebuildTables(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode);
-    drawGhost(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, pOff, penColor, penWeight);
-  }, [isPlaying, penColor, penWeight, rebuildTables, drawGhost]);
+    drawGhost(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, pOff, penColor, penWeight, penCount);
+  }, [isPlaying, penColor, penWeight, penCount, rebuildTables, drawGhost]);
 
   const g   = () => makeEffectiveGear(gearIdx, gearRatio);
   const cur = () => ({ fShape: fixedShape, fEcc: fixedEcc, fSides: fixedSides,
@@ -820,7 +875,7 @@ export default function SpirographPage() {
 
     const gear = makeEffectiveGear(gearIdx, gearRatio);
     rebuildTables(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode);
-    drawGhost(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode, rPenOff, penColor, penWeight);
+    drawGhost(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode, rPenOff, penColor, penWeight, penCount);
 
     // Auto-play
     simRef.current.phi = 0;
@@ -830,9 +885,17 @@ export default function SpirographPage() {
     currentRunRef.current = newRun;
     if (compositeMode) traceRunsRef.current.push(newRun);
     else               traceRunsRef.current = [newRun];
+    // Extra ring runs
+    extraRunsRef.current = [];
+    for (let ri = 0; ri < penCount - 1; ri++) {
+      const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
+      const extraRun: TraceRun = { points: [], color: ringColor, weight: penWeight };
+      extraRunsRef.current.push(extraRun);
+      traceRunsRef.current.push(extraRun);
+    }
     setHasTrace(true);
     setIsPlaying(true);
-  }, [gearIdx, gearRatio, meshMode, penColor, penWeight, rainbow, compositeMode, rebuildTables, drawGhost]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [gearIdx, gearRatio, meshMode, penColor, penWeight, penCount, rainbow, compositeMode, rebuildTables, drawGhost]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Gear ratio slider ────────────────────────────────────────────────────────
   const handleGearRatioInput = useCallback((v: number) => {
@@ -851,16 +914,24 @@ export default function SpirographPage() {
     currentRunRef.current = newRun;
     if (compositeMode) traceRunsRef.current.push(newRun);
     else               traceRunsRef.current = [newRun];
+    // Extra ring runs (rings 2–5)
+    extraRunsRef.current = [];
+    for (let ri = 0; ri < penCount - 1; ri++) {
+      const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
+      const extraRun: TraceRun = { points: [], color: ringColor, weight: penWeight };
+      extraRunsRef.current.push(extraRun);
+      traceRunsRef.current.push(extraRun);
+    }
     setHasTrace(true);
     setIsPlaying(true);
   }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
-      penColor, penWeight, rainbow, compositeMode, rebuildTables]);
+      penColor, penWeight, penCount, rainbow, compositeMode, rebuildTables]);
 
   const stopPlay = useCallback(() => setIsPlaying(false), []);
 
   const clearAll = useCallback(() => {
     stopPlay();
-    traceRunsRef.current = []; currentRunRef.current = null;
+    traceRunsRef.current = []; currentRunRef.current = null; extraRunsRef.current = [];
     setHasTrace(false);
     setTimeout(() => drawIdle(fixedShape, fixedEcc, fixedSides,
       movingShape, movingEcc, movingSides, makeEffectiveGear(gearIdx, gearRatio), meshMode, penOffset, penColor), 0);
@@ -1027,6 +1098,30 @@ export default function SpirographPage() {
               onChange={(v) => setPenOffset(v)} onInput={handlePenOffset}
               display={(v) => `${Math.round(v * 100)}%`} />
             <p className="text-[10px] text-muted-foreground/60 mt-1">0% = gear center · 100% = edge</p>
+          </section>
+
+          {/* ── Rings (multiple simultaneous pens) ───────────────── */}
+          <section className="flex flex-col gap-1.5">
+            <div className="flex items-baseline justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Rings</p>
+              <span className="text-[10px] font-mono text-foreground/50">{penCount}</span>
+            </div>
+            <div className="flex gap-1">
+              {[1, 2, 3, 4, 5].map((n) => (
+                <button key={n} onClick={() => setPenCount(n)} disabled={isPlaying}
+                  className={["flex-1 h-7 rounded text-[10px] font-bold border transition-all",
+                    penCount === n
+                      ? "bg-primary/14 text-primary border-primary/25"
+                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                    isPlaying ? "opacity-40 cursor-not-allowed" : "",
+                  ].join(" ")}>
+                  {n}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground/50 leading-tight">
+              {penCount === 1 ? "Single pen" : `${penCount} pens · evenly spaced inward from offset`}
+            </p>
           </section>
 
           <section>
