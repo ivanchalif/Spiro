@@ -218,9 +218,10 @@ export default function SpirographPage() {
     sim.movingShape  = mShape; sim.movingEcc  = mEcc; sim.movingSides = mSides;
     sim.meshMode     = mode;
     sim.gear         = gear;
-    // rack centering: origin at midpoint of 2-cycle travel
+    // rack centering: origin at midpoint of 2-cycle travel.
+    // rackOffY is negative because the gear sits ABOVE the rack (y < 0 in screen-down coords).
     sim.rackOffX     = gear.radius * RACK_MAX_PHI / 2;
-    sim.rackOffY     = gear.radius;
+    sim.rackOffY     = -gear.radius;
     sim.tablesReady  = true;
   }, []);
 
@@ -281,9 +282,10 @@ export default function SpirographPage() {
     const fixedSamples  = FIXED_TEETH   * TOOTH_SAMPLES;
     const movingSamples = movingTeeth   * TOOTH_SAMPLES;
 
-    // Rotation angle for moving gear body in world frame
+    // Rotation angle for moving gear body in world frame.
+    // Rack: gear rolls right → CW in screen coords → +psi.
     const rotAngle = sim.meshMode === "external" ? phi + psi + Math.PI
-                   : sim.meshMode === "rack"     ? -psi
+                   : sim.meshMode === "rack"     ? psi
                    : phi - psi; // internal
 
     // Moving gear center in screen space
@@ -316,8 +318,10 @@ export default function SpirographPage() {
       ctx.moveTo(-rackHalfW, barY);
       for (let i = 0; i <= nRackPts; i++) {
         const x = -rackHalfW + (i / nRackPts) * rackHalfW * 2;
-        // position along rack in tooth units
-        const toothPhase = (x + rackHalfW) / rackToothPitch;
+        // Phase based on world X so teeth lock to the gear's arc-length position.
+        // World X at screen x = offX + x/scale; offX = sim.rackOffX.
+        // → toothPhase = (sim.rackOffX*scale + x) / toothPitch  (all in screen units)
+        const toothPhase = (x + sim.rackOffX * scale) / rackToothPitch;
         const profile = 0.5 * (1 - Math.cos(toothPhase * TWO_PI));
         ctx.lineTo(x, barY - toothH * profile);
       }
@@ -342,26 +346,34 @@ export default function SpirographPage() {
       ctx.restore();
 
     } else if (sim.meshMode === "external") {
-      // ── CENTRAL HUB (small solid circle with outward teeth) ────────────────
-      const hubR = fixedR * 0.55;
-      const hubTeeth = Math.round(FIXED_TEETH * 0.55); // scaled tooth count
-      const hubSamples = hubTeeth * TOOTH_SAMPLES;
+      // ── CENTRAL HUB (full pitch-circle radius, outward teeth) ──────────────
+      // Hub uses the same fixedR / FIXED_TEETH as the physics so teeth align.
+      // Hub tooth profile: cos(t·N)   (NO +π).
+      // Gear tooth profile: cos(la·N + π).
+      // At contact: hub_profile + gear_profile = 1 — perfect interlock.
+      const hubSamples = FIXED_TEETH * TOOTH_SAMPLES;
 
-      // Hub body
+      // Hub body fill
       ctx.beginPath();
-      ctx.arc(0, 0, hubR, 0, TWO_PI);
+      for (let i = 0; i <= hubSamples; i++) {
+        const t    = (i / hubSamples) * TWO_PI;
+        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
+        if (i === 0) ctx.moveTo(base * Math.cos(t), base * Math.sin(t));
+        else         ctx.lineTo(base * Math.cos(t), base * Math.sin(t));
+      }
+      ctx.closePath();
       ctx.fillStyle = "rgba(200, 215, 245, 0.10)";
       ctx.fill();
 
-      // Outward teeth on hub
+      // Outward teeth on hub — NO +π so peaks interlock with gear valleys
       ctx.save();
       ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
       ctx.shadowBlur  = 6;
       ctx.beginPath();
       for (let i = 0; i <= hubSamples; i++) {
         const t    = (i / hubSamples) * TWO_PI;
-        const base = gearRadius(sim.fixedShape, hubR, sim.fixedEcc, t, sim.fixedSides);
-        const r    = base + toothH * 0.5 * (1 - Math.cos(t * hubTeeth + Math.PI));
+        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
+        const r    = base + toothH * 0.5 * (1 - Math.cos(t * FIXED_TEETH));
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
@@ -371,15 +383,8 @@ export default function SpirographPage() {
       ctx.stroke();
       ctx.restore();
 
-      // Hub rim
-      ctx.beginPath();
-      ctx.arc(0, 0, hubR + ringW * 0.3, 0, TWO_PI);
-      ctx.strokeStyle = "rgba(180, 195, 240, 0.25)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-
       // Contact point
-      const contactR = gearRadius(sim.fixedShape, hubR, sim.fixedEcc, phi, sim.fixedSides);
+      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides);
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
@@ -399,10 +404,16 @@ export default function SpirographPage() {
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
       ctx.closePath();
+      // Inner toothed edge of ring.
+      // Formula: r = base + toothH/2·(1 + cos(t·N))
+      //   → space between teeth at base+toothH (ring root)
+      //   → tooth tip at base (pointing inward)
+      // Gear teeth: base to base+toothH outward, with +π phase shift.
+      // At contact: ring_profile + gear_profile = 1 → perfect interlock, zero overlap.
       for (let i = 0; i <= fixedSamples; i++) {
         const t    = (i / fixedSamples) * TWO_PI;
         const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
-        const r    = base - toothH * 0.5 * (1 - Math.cos(t * FIXED_TEETH));
+        const r    = base + toothH * 0.5 * (1 + Math.cos(t * FIXED_TEETH));
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
@@ -424,7 +435,7 @@ export default function SpirographPage() {
       ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
 
-      // Inner toothed edge
+      // Inner toothed edge stroke (same formula as the fill path above)
       ctx.save();
       ctx.shadowColor = "rgba(160, 175, 255, 0.25)";
       ctx.shadowBlur  = 6;
@@ -432,7 +443,7 @@ export default function SpirographPage() {
       for (let i = 0; i <= fixedSamples; i++) {
         const t    = (i / fixedSamples) * TWO_PI;
         const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
-        const r    = base - toothH * 0.5 * (1 - Math.cos(t * FIXED_TEETH));
+        const r    = base + toothH * 0.5 * (1 + Math.cos(t * FIXED_TEETH));
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }

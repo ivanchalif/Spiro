@@ -137,11 +137,12 @@ export function computeMeshState(
     // and look up the correct gear angle from the moving table.
     const arcLen = movingBaseR * phi;
     const psi    = angleForArcLength(movingTable, arcLen);
-    // Gear center above the rack (rack at y = 0)
+    // Screen convention: y increases downward.
+    // Rack lies at y = 0. Gear center is ABOVE the rack: y = -movingBaseR.
+    // As the gear rolls right, it rotates CW in screen coords → +psi.
     const cx = arcLen;
-    const cy = movingBaseR;
-    // Gear rotates clockwise as it rolls right: world angle = –psi
-    const penAngleWorld = -psi;
+    const cy = -movingBaseR;
+    const penAngleWorld = psi; // CW rotation in screen coords
     const d  = penOffset * movingBaseR;
     return {
       phi, psi, arcLenFixed: arcLen,
