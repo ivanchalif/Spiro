@@ -53,6 +53,40 @@ const SPEED_DELTAS: Record<SpeedMode, number> = { partial: 0.005, full: 0.018, a
 
 interface TraceRun { points: { x: number; y: number }[]; color: string; weight: number; }
 
+// ─── Nested gear math ─────────────────────────────────────────────────────────
+// Computes the position of a small gear rolling inside the primary moving gear.
+// phi, psi1: primary gear driver and arc-length angle from computeMeshState.
+// c1x, c1y: primary gear center in WORLD space.
+// r1: primary gear base radius (world units).
+// r2: nested gear radius (world units).
+// N: how many times the nested gear orbits per primary phi cycle (integer).
+// d: pen offset as fraction of r2 (0–1).
+interface NestedState {
+  penX: number; penY: number;
+  centerX: number; centerY: number;
+  theta2: number;
+}
+function computeNestedGear(
+  phi: number, psi1: number,
+  c1x: number, c1y: number,
+  r1: number, r2: number,
+  N: number, d: number,
+): NestedState {
+  // Gear 1 world orientation: rolling inside ring => theta1 = phi - psi1
+  const theta1 = phi - psi1;
+  // Nested gear orbits inside gear 1 at angle N*phi in gear 1's local frame
+  const phi2_world = theta1 + N * phi;
+  const centerX = c1x + (r1 - r2) * Math.cos(phi2_world);
+  const centerY = c1y + (r1 - r2) * Math.sin(phi2_world);
+  // Rolling without slip: nested gear rotation = theta1 - N*phi*(r1/r2)
+  const theta2 = theta1 - N * phi * (r1 / r2);
+  return {
+    centerX, centerY, theta2,
+    penX: centerX + d * r2 * Math.cos(theta2),
+    penY: centerY + d * r2 * Math.sin(theta2),
+  };
+}
+
 // ─── Scale helper ─────────────────────────────────────────────────────────────
 function computeScale(mode: MeshMode, gear: GearPreset, canvasSize: number): number {
   if (mode === "rack") {
@@ -188,6 +222,10 @@ export default function SpirographPage() {
   const [movingShape, setMovingShape] = useState<GearShape>("circle");
   const [movingEcc,   setMovingEcc]   = useState(0.3);
   const [movingSides, setMovingSides] = useState(5);
+  const [nestedEnabled,   setNestedEnabled]   = useState(false);
+  const [nestedRatio,     setNestedRatio]     = useState(40);  // % of gear 1 radius (20–70)
+  const [nestedSpeed,     setNestedSpeed]     = useState(3);   // integer N (1–8)
+  const [nestedPenOffset, setNestedPenOffset] = useState(0.7); // 0–1 of nested gear radius
   const [penOffset,   setPenOffset]   = useState(0.65);
   const [penCount,    setPenCount]    = useState(1);
   const [penWeight,   setPenWeight]   = useState(2);
@@ -257,6 +295,7 @@ export default function SpirographPage() {
     curPenColor: string,
     curPenOffset: number,
     extraPens?: { x: number; y: number; color: string }[],
+    nested?: NestedState & { r2: number },
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -596,6 +635,63 @@ export default function SpirographPage() {
     ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 1; ctx.stroke();
     ctx.restore();
 
+    // ── NESTED GEAR (gear 2 rolling inside gear 1) ───────────────────────────
+    if (nested) {
+      const nrS   = nested.r2 * scale;
+      const ncxS  = (nested.centerX - offX) * scale;
+      const ncyS  = (nested.centerY - offY) * scale;
+      const nTeeth = Math.max(6, Math.round(gear.teeth * nested.r2 / sim.gear.radius));
+      const nSamples = nTeeth * TOOTH_SAMPLES;
+      const nPitch = (TWO_PI * nrS) / nTeeth;
+      const nToothH = nPitch * 0.38;
+
+      // Nested gear fill
+      ctx.beginPath();
+      ctx.arc(ncxS, ncyS, nrS, 0, TWO_PI);
+      ctx.fillStyle = "rgba(255, 200, 80, 0.06)";
+      ctx.fill();
+
+      // Nested gear toothed outline
+      ctx.save();
+      ctx.shadowColor = "rgba(255, 190, 60, 0.4)";
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      for (let i = 0; i <= nSamples; i++) {
+        const la = (i / nSamples) * TWO_PI;
+        const r  = nrS + nToothH * 0.5 * (1 - Math.cos(la * nTeeth + Math.PI));
+        const wa = la + nested.theta2;
+        if (i === 0) ctx.moveTo(ncxS + r * Math.cos(wa), ncyS + r * Math.sin(wa));
+        else         ctx.lineTo(ncxS + r * Math.cos(wa), ncyS + r * Math.sin(wa));
+      }
+      ctx.closePath();
+      ctx.strokeStyle = "rgba(255, 200, 80, 0.80)";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.restore();
+
+      // Hub of nested gear
+      ctx.beginPath();
+      ctx.arc(ncxS, ncyS, Math.max(2, nrS * 0.07), 0, TWO_PI);
+      ctx.fillStyle = "rgba(255,200,80,0.4)"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,200,80,0.8)"; ctx.lineWidth = 0.9; ctx.stroke();
+
+      // Nested pen arm + dot
+      const npxS = (nested.penX - offX) * scale;
+      const npyS = (nested.penY - offY) * scale;
+      ctx.beginPath();
+      ctx.moveTo(ncxS, ncyS);
+      ctx.lineTo(npxS, npyS);
+      ctx.strokeStyle = "rgba(255,255,255,0.15)"; ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.save();
+      ctx.shadowColor = "rgba(255,200,60,0.9)"; ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(npxS, npyS, 4, 0, TWO_PI);
+      ctx.fillStyle = "rgba(255,210,70,0.95)"; ctx.fill();
+      ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 0.9; ctx.stroke();
+      ctx.restore();
+    }
+
     ctx.restore(); // translate(cx, cy)
   }, []);
 
@@ -627,6 +723,7 @@ export default function SpirographPage() {
     mShape: GearShape, mEcc: number, mSides: number,
     gear: GearPreset, mode: MeshMode, pOff: number, color: string, weight: number,
     rings = 1,
+    nestedOn = false, nestedR2 = 0, nestedN = 1, nestedD = 0.7,
   ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -644,38 +741,51 @@ export default function SpirographPage() {
 
     const ft = sim.fixedTable, mt = sim.movingTable;
     const ratio = totalArcLength(ft) / totalArcLength(mt);
+    // When nested, we need more phi to close: multiply by nestedN
+    const baseLoops = Math.max(8, Math.ceil(ratio) * 2);
     const totalPhi = mode === "rack"
       ? RACK_MAX_PHI
-      : TWO_PI * Math.max(8, Math.ceil(ratio) * 2);
-    const numSteps = 500;
+      : TWO_PI * (nestedOn ? baseLoops * nestedN : baseLoops);
+    const numSteps = nestedOn ? Math.min(1200, 500 * nestedN) : 500;
 
     const phi0 = mode === "rack" ? sim.rackOffX / gear.radius : 0;
     const state0 = computeMeshState(
       phi0, fShape, FIXED_BASE_R, fEcc, ft, fSides,
       mShape, gear.radius, mEcc, mt, mSides, pOff, mode,
     );
+    // Show idle gear frame; nested gear not shown here (too expensive at idle)
     renderFrame(phi0, state0.psi, state0.movingCenterX, state0.movingCenterY,
       state0.penX, state0.penY, scale, color, pOff);
 
-    // Ghost trace overlays — one per ring (ring 0 is primary at pOff, others go inward)
+    // Ghost trace overlays
     const ghostColors = [color, ...MULTI_RING_COLORS];
-    for (let ri = 0; ri < rings; ri++) {
+    const numRings = nestedOn ? 1 : rings; // when nested, only draw the nested pen trace
+    for (let ri = 0; ri < numRings; ri++) {
       const ringOff = ri === 0 ? pOff : pOff * (rings - ri) / rings;
-      const ghostColor = ghostColors[ri % ghostColors.length];
+      const ghostColor = nestedOn ? "rgba(255,200,70,0.9)" : ghostColors[ri % ghostColors.length];
       ctx.save();
-      ctx.globalAlpha = 0.13;
+      ctx.globalAlpha = 0.15;
       ctx.strokeStyle = ghostColor;
       ctx.lineWidth = weight * 0.8;
       ctx.lineCap = "round"; ctx.lineJoin = "round";
       ctx.beginPath();
       for (let i = 0; i <= numSteps; i++) {
-        const ph = (i / numSteps) * totalPhi;
+        const ph = phi0 + (i / numSteps) * totalPhi;
         const st = computeMeshState(
           ph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
           mShape, gear.radius, mEcc, mt, mSides, ringOff, mode,
         );
-        const px = cx + (st.penX - offX) * scale;
-        const py = cy + (st.penY - offY) * scale;
+        let px: number, py: number;
+        if (nestedOn) {
+          const ns = computeNestedGear(ph, st.psi,
+            st.movingCenterX, st.movingCenterY,
+            gear.radius, nestedR2, nestedN, nestedD);
+          px = cx + (ns.penX - offX) * scale;
+          py = cy + (ns.penY - offY) * scale;
+        } else {
+          px = cx + (st.penX - offX) * scale;
+          py = cy + (st.penY - offY) * scale;
+        }
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
       ctx.stroke();
@@ -697,7 +807,8 @@ export default function SpirographPage() {
     rebuildTables(fixedShape, fixedEcc, fixedSides,
       movingShape, movingEcc, movingSides, gear, meshMode);
     if (!isPlaying) drawGhost(fixedShape, fixedEcc, fixedSides,
-      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor, penWeight, penCount);
+      movingShape, movingEcc, movingSides, gear, meshMode, penOffset, penColor, penWeight, penCount,
+      nestedEnabled, gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
   }, [gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── Animation loop ──────────────────────────────────────────────────────────
@@ -715,11 +826,16 @@ export default function SpirographPage() {
     const capPen     = penOffset;   const capColor = penColor;  const capWeight = penWeight;
     const capRainbow = rainbow;     const capComposite = compositeMode;
     const capRings   = penCount;
+    const capNested  = nestedEnabled;
+    const capNR2     = capGear.radius * nestedRatio / 100;  // nested gear radius in world units
+    const capNN      = nestedSpeed;
+    const capND      = nestedPenOffset;
 
     const ratio  = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
+    const baseLoops = Math.max(10, Math.ceil(ratio) * 3);
     const maxPhi = capMode === "rack"
       ? RACK_MAX_PHI
-      : TWO_PI * Math.max(10, Math.ceil(ratio) * 3);
+      : TWO_PI * (capNested ? baseLoops * capNN : baseLoops);
 
     let frameCount = 0;
     const loop = () => {
@@ -747,26 +863,43 @@ export default function SpirographPage() {
         }
       }
 
-      currentRunRef.current?.points.push({ x: state.penX, y: state.penY });
+      // Nested gear computation (gear 2 rolling inside gear 1)
+      let nestedState: (NestedState & { r2: number }) | undefined;
+      if (capNested) {
+        nestedState = {
+          ...computeNestedGear(
+            sim.phi, state.psi,
+            state.movingCenterX, state.movingCenterY,
+            capGear.radius, capNR2, capNN, capND,
+          ),
+          r2: capNR2,
+        };
+        // Trace the NESTED pen when nested is on
+        currentRunRef.current?.points.push({ x: nestedState.penX, y: nestedState.penY });
+      } else {
+        currentRunRef.current?.points.push({ x: state.penX, y: state.penY });
+      }
 
       // Extra rings (rings 2–5) — each at a closer offset, inward from the primary
       const extraPens: { x: number; y: number; color: string }[] = [];
-      for (let ri = 0; ri < capRings - 1; ri++) {
-        const off = capPen * (capRings - 1 - ri) / capRings;
-        const st = computeMeshState(
-          sim.phi,
-          capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
-          capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
-          off, capMode,
-        );
-        const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
-        extraRunsRef.current[ri]?.points.push({ x: st.penX, y: st.penY });
-        extraPens.push({ x: st.penX, y: st.penY, color: ringColor });
+      if (!capNested) {
+        for (let ri = 0; ri < capRings - 1; ri++) {
+          const off = capPen * (capRings - 1 - ri) / capRings;
+          const st = computeMeshState(
+            sim.phi,
+            capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
+            capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
+            off, capMode,
+          );
+          const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
+          extraRunsRef.current[ri]?.points.push({ x: st.penX, y: st.penY });
+          extraPens.push({ x: st.penX, y: st.penY, color: ringColor });
+        }
       }
 
       renderFrame(sim.phi, state.psi,
         state.movingCenterX, state.movingCenterY,
-        state.penX, state.penY, scale, frameColor, capPen, extraPens);
+        state.penX, state.penY, scale, frameColor, capPen, extraPens, nestedState);
 
       sim.phi += delta;
       frameCount++;
@@ -794,7 +927,9 @@ export default function SpirographPage() {
     rafRef.current = requestAnimationFrame(loop);
     return () => { if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; } };
   }, [isPlaying, speed, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
-      penOffset, penCount, penColor, penWeight, rainbow, compositeMode, getCanvasSize, renderFrame]);
+      penOffset, penCount, penColor, penWeight, rainbow, compositeMode,
+      nestedEnabled, nestedRatio, nestedSpeed, nestedPenOffset,
+      getCanvasSize, renderFrame]);
 
   // ─── Canvas resize ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -823,8 +958,9 @@ export default function SpirographPage() {
   ) => {
     if (isPlaying) return;
     rebuildTables(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode);
-    drawGhost(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, pOff, penColor, penWeight, penCount);
-  }, [isPlaying, penColor, penWeight, penCount, rebuildTables, drawGhost]);
+    drawGhost(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, pOff, penColor, penWeight, penCount,
+      nestedEnabled, gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
+  }, [isPlaying, penColor, penWeight, penCount, nestedEnabled, nestedRatio, nestedSpeed, nestedPenOffset, rebuildTables, drawGhost]);
 
   const g   = () => makeEffectiveGear(gearIdx, gearRatio);
   const cur = () => ({ fShape: fixedShape, fEcc: fixedEcc, fSides: fixedSides,
@@ -875,7 +1011,8 @@ export default function SpirographPage() {
 
     const gear = makeEffectiveGear(gearIdx, gearRatio);
     rebuildTables(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode);
-    drawGhost(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode, rPenOff, penColor, penWeight, penCount);
+    drawGhost(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode, rPenOff, penColor, penWeight, penCount,
+      nestedEnabled, gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
 
     // Auto-play
     simRef.current.phi = 0;
@@ -1160,6 +1297,61 @@ export default function SpirographPage() {
               ))}
             </div>
           </section>
+
+          <div className="h-px bg-border/50" />
+
+          {/* ── Nested Gear ───────────────────────────────────────── */}
+          <section className="flex flex-col gap-2">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Nested Gear</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5">Gear inside the rolling gear.</p>
+              </div>
+              <button onClick={() => { setNestedEnabled((v) => !v); }}
+                disabled={isPlaying}
+                className={["relative inline-flex h-5 w-9 shrink-0 mt-0.5 items-center rounded-full transition-colors",
+                  nestedEnabled ? "bg-amber-500" : "bg-secondary",
+                  isPlaying ? "opacity-40 cursor-not-allowed" : ""].join(" ")}>
+                <span className={["inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform",
+                  nestedEnabled ? "translate-x-4" : "translate-x-0.5"].join(" ")} />
+              </button>
+            </div>
+            {nestedEnabled && (
+              <div className={["flex flex-col gap-2 pl-2 border-l-2 border-amber-500/30 transition-opacity",
+                isPlaying ? "opacity-40 pointer-events-none" : ""].join(" ")}>
+                <ControlSlider label="Gear Size" value={nestedRatio} min={15} max={70} step={1}
+                  onChange={(v) => { setNestedRatio(v); }}
+                  onInput={(v) => { setNestedRatio(v); }}
+                  display={(v) => `${Math.round(v)}%`} />
+                <p className="text-[10px] text-muted-foreground/50 -mt-1">% of rolling gear radius</p>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-[10px] text-muted-foreground">Speed N</p>
+                    <span className="text-[10px] font-mono text-foreground/50">{nestedSpeed}×</span>
+                  </div>
+                  <div className="flex gap-1">
+                    {[1,2,3,4,5,6,7,8].map((n) => (
+                      <button key={n} onClick={() => setNestedSpeed(n)} disabled={isPlaying}
+                        className={["flex-1 h-6 rounded text-[10px] font-bold border transition-all",
+                          nestedSpeed === n
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                            : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                        ].join(" ")}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground/50">Rotations per carrier orbit</p>
+                </div>
+                <ControlSlider label="Pen Reach" value={nestedPenOffset} min={0.1} max={1} step={0.05}
+                  onChange={(v) => { setNestedPenOffset(v); }}
+                  onInput={(v) => { setNestedPenOffset(v); }}
+                  display={(v) => `${Math.round(v * 100)}%`} />
+              </div>
+            )}
+          </section>
+
+          <div className="h-px bg-border/50" />
 
           {/* ── Composite mode ────────────────────────────────────── */}
           <section>
