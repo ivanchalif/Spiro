@@ -407,10 +407,10 @@ export default function SpirographPage() {
     sim.movingShape  = mShape; sim.movingEcc  = mEcc; sim.movingSides = mSides;
     sim.meshMode     = mode;
     sim.gear         = gear;
-    // rack centering: origin at midpoint of 2-cycle travel.
-    // rackOffY is negative because the gear sits ABOVE the rack (y < 0 in screen-down coords).
+    // rack centering: X at midpoint of one-way travel; Y = 0 so rack bar is centred,
+    // gear traces above (top pass) and below (bottom pass).
     sim.rackOffX     = gear.radius * RACK_MAX_PHI / 2;
-    sim.rackOffY     = -gear.radius;
+    sim.rackOffY     = 0;
     sim.tablesReady  = true;
   }, []);
 
@@ -488,50 +488,51 @@ export default function SpirographPage() {
 
     // ── Fixed gear / rack rendering ──────────────────────────────────────────
     if (sim.meshMode === "rack") {
-      // ── RACK BAR with toothed top edge ─────────────────────────────────────
-      const barY = (0 - offY) * scale; // rack surface in screen space
+      // ── RACK BAR — symmetric bar with toothed top AND bottom edges ──────────
+      const barCY = (0 - offY) * scale; // rack centre-line in screen space (= 0 with offY=0)
       const rackHalfW = sim.rackOffX * scale * 1.08;
-      const barH = Math.max(8, toothH * 1.5);
-      const rackToothPitch = toothPitch; // same pitch as moving gear
+      const barHalf = Math.max(4, toothH * 0.75); // half-height of bar body
+      const rackToothPitch = toothPitch;
       const nRackPts = Math.round(rackHalfW * 2 / rackToothPitch) * 12;
 
-      // Fill body
+      // Fill body (centred on barCY)
       ctx.fillStyle = "rgba(200, 215, 245, 0.08)";
       ctx.beginPath();
-      ctx.rect(-rackHalfW, barY, rackHalfW * 2, barH);
+      ctx.rect(-rackHalfW, barCY - barHalf, rackHalfW * 2, barHalf * 2);
       ctx.fill();
 
-      // Toothed top edge
-      ctx.save();
-      ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
-      ctx.shadowBlur = 5;
-      ctx.beginPath();
-      ctx.moveTo(-rackHalfW, barY);
-      for (let i = 0; i <= nRackPts; i++) {
-        const x = -rackHalfW + (i / nRackPts) * rackHalfW * 2;
-        // Phase based on world X so teeth lock to the gear's arc-length position.
-        // World X at screen x = offX + x/scale; offX = sim.rackOffX.
-        // → toothPhase = (sim.rackOffX*scale + x) / toothPitch  (all in screen units)
-        const toothPhase = (x + sim.rackOffX * scale) / rackToothPitch;
-        const profile = 0.5 * (1 - Math.cos(toothPhase * TWO_PI));
-        ctx.lineTo(x, barY - toothH * profile);
-      }
-      ctx.lineTo(rackHalfW, barY);
-      ctx.closePath();
-      ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
-      ctx.lineWidth = 1.3;
-      ctx.stroke();
-      ctx.fillStyle = "rgba(200, 215, 245, 0.07)";
-      ctx.fill();
-      ctx.restore();
+      const drawTeeth = (yBase: number, dir: 1 | -1) => {
+        ctx.save();
+        ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.moveTo(-rackHalfW, yBase);
+        for (let i = 0; i <= nRackPts; i++) {
+          const x = -rackHalfW + (i / nRackPts) * rackHalfW * 2;
+          const toothPhase = (x + sim.rackOffX * scale) / rackToothPitch;
+          const profile = 0.5 * (1 - Math.cos(toothPhase * TWO_PI));
+          ctx.lineTo(x, yBase + dir * toothH * profile);
+        }
+        ctx.lineTo(rackHalfW, yBase);
+        ctx.closePath();
+        ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
+        ctx.lineWidth = 1.3;
+        ctx.stroke();
+        ctx.fillStyle = "rgba(200, 215, 245, 0.07)";
+        ctx.fill();
+        ctx.restore();
+      };
+      drawTeeth(barCY - barHalf, -1); // top edge: teeth protrude upward
+      drawTeeth(barCY + barHalf,  1); // bottom edge: teeth protrude downward
 
-      // Contact point (gold dot on rack surface below gear center)
-      const contactX = mcxS;
+      // Contact dot — on whichever edge the gear is currently touching
+      const isBottomPass = mcyS > 0;
+      const contactY = isBottomPass ? barCY + barHalf : barCY - barHalf;
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
       ctx.beginPath();
-      ctx.arc(contactX, barY, 3.5, 0, TWO_PI);
+      ctx.arc(mcxS, contactY, 3.5, 0, TWO_PI);
       ctx.fillStyle = "rgba(255,220,70,0.95)";
       ctx.fill();
       ctx.restore();
@@ -876,20 +877,22 @@ export default function SpirographPage() {
     const ratio = totalArcLength(ft) / totalArcLength(mt);
     const baseLoops = closureLoops(ratio);
     const totalPhi = mode === "rack"
-      ? RACK_MAX_PHI
+      ? 2 * RACK_MAX_PHI
       : TWO_PI * (nestedOn ? baseLoops * nestedN : baseLoops);
     const numSteps = nestedOn ? Math.min(2000, 800 * nestedN) : Math.min(2000, baseLoops * 60);
 
-    const phi0 = mode === "rack" ? sim.rackOffX / gear.radius : 0;
+    // idlePhi: where to show the gear at rest (centre of top pass for rack)
+    const idlePhi = mode === "rack" ? sim.rackOffX / gear.radius : 0;
     const state0 = computeMeshState(
-      phi0, fShape, FIXED_BASE_R, fEcc, ft, fSides,
+      idlePhi, fShape, FIXED_BASE_R, fEcc, ft, fSides,
       mShape, gear.radius, mEcc, mt, mSides, pOff, mode,
     );
     // Show idle gear frame; nested gear not shown here (too expensive at idle)
-    renderFrame(phi0, state0.psi, state0.movingCenterX, state0.movingCenterY,
+    renderFrame(idlePhi, state0.psi, state0.movingCenterX, state0.movingCenterY,
       state0.penX, state0.penY, scale, color, pOff);
 
     // Ghost trace overlays
+    const rackMaxCXIdle = gear.radius * RACK_MAX_PHI; // world X span of one pass
     const ghostColors = [color, ...MULTI_RING_COLORS];
     const numRings = nestedOn ? 1 : rings; // when nested, only draw the nested pen trace
     for (let ri = 0; ri < numRings; ri++) {
@@ -902,21 +905,28 @@ export default function SpirographPage() {
       ctx.lineCap = "round"; ctx.lineJoin = "round";
       ctx.beginPath();
       for (let i = 0; i <= numSteps; i++) {
-        const ph = phi0 + (i / numSteps) * totalPhi;
+        const ph = (i / numSteps) * totalPhi; // always start from 0
+        const rackBot = mode === "rack" && ph > RACK_MAX_PHI;
+        const lph = rackBot ? ph - RACK_MAX_PHI : ph;
         const st = computeMeshState(
-          ph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
+          lph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
           mShape, gear.radius, mEcc, mt, mSides, ringOff, mode,
         );
         let px: number, py: number;
         if (nestedOn) {
-          const ns = computeNestedGear(ph, st.psi,
-            st.movingCenterX, st.movingCenterY,
+          const mcxW = rackBot ? rackMaxCXIdle - st.movingCenterX : st.movingCenterX;
+          const mcyW = rackBot ? -st.movingCenterY : st.movingCenterY;
+          const ns = computeNestedGear(lph, st.psi, mcxW, mcyW,
             gear.radius, nestedR2, nestedN, nestedD);
-          px = cx + (ns.penX - offX) * scale;
-          py = cy + (ns.penY - offY) * scale;
+          const nPenX = rackBot ? rackMaxCXIdle - ns.penX : ns.penX;
+          const nPenY = rackBot ? -ns.penY : ns.penY;
+          px = cx + (nPenX - offX) * scale;
+          py = cy + (nPenY - offY) * scale;
         } else {
-          px = cx + (st.penX - offX) * scale;
-          py = cy + (st.penY - offY) * scale;
+          const penXw = rackBot ? rackMaxCXIdle - st.penX : st.penX;
+          const penYw = rackBot ? -st.penY : st.penY;
+          px = cx + (penXw - offX) * scale;
+          py = cy + (penYw - offY) * scale;
         }
         if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
       }
@@ -966,19 +976,33 @@ export default function SpirographPage() {
     const ratio  = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
     const baseLoops = closureLoops(ratio);
     const maxPhi = capMode === "rack"
-      ? RACK_MAX_PHI
+      ? 2 * RACK_MAX_PHI
       : TWO_PI * (capNested ? baseLoops * capNN : baseLoops);
 
     let frameCount = 0;
     const loop = () => {
       const canvasSize = getCanvasSize();
       const scale = computeScale(capMode, capGear, canvasSize);
+
+      // Rack mode: detect bottom pass (phi > RACK_MAX_PHI) and mirror positions
+      const rackBottom = capMode === "rack" && sim.phi > RACK_MAX_PHI;
+      const meshPhi    = rackBottom ? sim.phi - RACK_MAX_PHI : sim.phi;
+      const rackMaxCX  = capGear.radius * RACK_MAX_PHI; // world-X span of one pass
+
       const state = computeMeshState(
-        sim.phi,
+        meshPhi,
         capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
         capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
         capPen, capMode,
       );
+
+      // Effective positions: mirror X and flip Y for bottom pass
+      const effMcx  = rackBottom ? rackMaxCX - state.movingCenterX : state.movingCenterX;
+      const effMcy  = rackBottom ? -state.movingCenterY            : state.movingCenterY;
+      const effPenX = rackBottom ? rackMaxCX - state.penX          : state.penX;
+      const effPenY = rackBottom ? -state.penY                     : state.penY;
+      // For rack bottom pass the gear is inverted → add π to rotation
+      const effPsi  = rackBottom ? state.psi + Math.PI             : state.psi;
 
       let frameColor = capColor;
       if (capRainbow) {
@@ -998,18 +1022,18 @@ export default function SpirographPage() {
       // Nested gear computation (gear 2 rolling inside gear 1)
       let nestedState: (NestedState & { r2: number }) | undefined;
       if (capNested) {
-        nestedState = {
-          ...computeNestedGear(
-            sim.phi, state.psi,
-            state.movingCenterX, state.movingCenterY,
-            capGear.radius, capNR2, capNN, capND,
-          ),
-          r2: capNR2,
-        };
-        // Trace the NESTED pen when nested is on
-        currentRunRef.current?.points.push({ x: nestedState.penX, y: nestedState.penY });
+        const rawNested = computeNestedGear(
+          meshPhi, state.psi,
+          effMcx, effMcy,
+          capGear.radius, capNR2, capNN, capND,
+        );
+        // Mirror nested pen for rack bottom pass
+        const nPenX = rackBottom ? rackMaxCX - rawNested.penX : rawNested.penX;
+        const nPenY = rackBottom ? -rawNested.penY             : rawNested.penY;
+        nestedState = { ...rawNested, penX: nPenX, penY: nPenY, r2: capNR2 };
+        currentRunRef.current?.points.push({ x: nPenX, y: nPenY });
       } else {
-        currentRunRef.current?.points.push({ x: state.penX, y: state.penY });
+        currentRunRef.current?.points.push({ x: effPenX, y: effPenY });
       }
 
       // Extra rings (rings 2–5) — each at a closer offset, inward from the primary
@@ -1018,20 +1042,22 @@ export default function SpirographPage() {
         for (let ri = 0; ri < capRings - 1; ri++) {
           const off = capPen * (capRings - 1 - ri) / capRings;
           const st = computeMeshState(
-            sim.phi,
+            meshPhi,
             capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
             capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
             off, capMode,
           );
           const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
-          extraRunsRef.current[ri]?.points.push({ x: st.penX, y: st.penY });
-          extraPens.push({ x: st.penX, y: st.penY, color: ringColor });
+          const rPenX = rackBottom ? rackMaxCX - st.penX : st.penX;
+          const rPenY = rackBottom ? -st.penY             : st.penY;
+          extraRunsRef.current[ri]?.points.push({ x: rPenX, y: rPenY });
+          extraPens.push({ x: rPenX, y: rPenY, color: ringColor });
         }
       }
 
-      renderFrame(sim.phi, state.psi,
-        state.movingCenterX, state.movingCenterY,
-        state.penX, state.penY, scale, frameColor, capPen, extraPens, nestedState);
+      renderFrame(sim.phi, effPsi,
+        effMcx, effMcy,
+        effPenX, effPenY, scale, frameColor, capPen, extraPens, nestedState);
 
       sim.phi += delta;
       frameCount++;
