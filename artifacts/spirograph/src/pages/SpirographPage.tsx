@@ -372,7 +372,7 @@ export default function SpirographPage() {
   const [penCount,    setPenCount]    = useState(1);
   const [penWeight,   setPenWeight]   = useState(2);
   const [penColor,    setPenColor]    = useState("#60a5fa");
-  const [rainbow,     setRainbow]     = useState(false);
+  const [rainbow,     setRainbow]     = useState(true);
   const [compositeMode, setCompositeMode] = useState(false);
   const [speed,       setSpeed]       = useState<SpeedMode>("full");
   const [isPlaying,   setIsPlaying]   = useState(false);
