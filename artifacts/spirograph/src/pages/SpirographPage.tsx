@@ -528,39 +528,81 @@ export default function SpirographPage() {
       const rackToothPitch = toothPitch;
       const nRackPts = Math.round(rackHalfW * 2 / rackToothPitch) * 12;
 
-      // Fill body (centred on barCY)
-      ctx.fillStyle = "rgba(200, 215, 245, 0.08)";
-      ctx.beginPath();
-      ctx.rect(-rackHalfW, barCY - barHalf, rackHalfW * 2, barHalf * 2);
-      ctx.fill();
+      // Profile helper: y-displacement at a given screen-x (custom rack only)
+      const hasCustomRack = !!(customFixedRT && customFixedRT.length > 0);
+      const getProfileY = (xs: number): number => {
+        if (!customFixedRT || customFixedRT.length === 0) return 0;
+        const worldX  = xs / scale + offX;
+        const phi_x   = worldX / gear.radius; // gear.radius = movingBaseR in rack mode
+        const RMAX    = 4 * Math.PI;
+        const t       = ((phi_x % RMAX) + RMAX) % RMAX / RMAX;
+        const N       = customFixedRT.length;
+        const idx     = t * N;
+        const lo      = Math.floor(idx) % N;
+        const hi      = (lo + 1) % N;
+        const frac    = idx - Math.floor(idx);
+        return (customFixedRT[lo] * (1 - frac) + customFixedRT[hi] * frac) * movingR * 0.5;
+      };
 
-      const drawTeeth = (yBase: number, dir: 1 | -1) => {
+      // Fill body — wavy when custom rack, flat otherwise
+      if (hasCustomRack) {
+        const n = nRackPts;
+        ctx.beginPath();
+        for (let i = 0; i <= n; i++) {
+          const xs = -rackHalfW + (i / n) * rackHalfW * 2;
+          const py = barCY + getProfileY(xs);
+          if (i === 0) ctx.moveTo(xs, py - barHalf); else ctx.lineTo(xs, py - barHalf);
+        }
+        for (let i = n; i >= 0; i--) {
+          const xs = -rackHalfW + (i / n) * rackHalfW * 2;
+          const py = barCY + getProfileY(xs);
+          ctx.lineTo(xs, py + barHalf);
+        }
+        ctx.closePath();
+        ctx.fillStyle = "rgba(200, 215, 245, 0.08)";
+        ctx.fill();
         ctx.save();
         ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
         ctx.shadowBlur = 5;
-        ctx.beginPath();
-        ctx.moveTo(-rackHalfW, yBase);
-        for (let i = 0; i <= nRackPts; i++) {
-          const x = -rackHalfW + (i / nRackPts) * rackHalfW * 2;
-          const toothPhase = (x + sim.rackOffX * scale) / rackToothPitch;
-          const profile = 0.5 * (1 - Math.cos(toothPhase * TWO_PI));
-          ctx.lineTo(x, yBase + dir * toothH * profile);
-        }
-        ctx.lineTo(rackHalfW, yBase);
-        ctx.closePath();
         ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
         ctx.lineWidth = 1.3;
         ctx.stroke();
-        ctx.fillStyle = "rgba(200, 215, 245, 0.07)";
-        ctx.fill();
         ctx.restore();
-      };
-      drawTeeth(barCY - barHalf, -1); // top edge: teeth protrude upward
-      drawTeeth(barCY + barHalf,  1); // bottom edge: teeth protrude downward
+      } else {
+        ctx.fillStyle = "rgba(200, 215, 245, 0.08)";
+        ctx.beginPath();
+        ctx.rect(-rackHalfW, barCY - barHalf, rackHalfW * 2, barHalf * 2);
+        ctx.fill();
+
+        const drawTeeth = (yBase: number, dir: 1 | -1) => {
+          ctx.save();
+          ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
+          ctx.shadowBlur = 5;
+          ctx.beginPath();
+          ctx.moveTo(-rackHalfW, yBase);
+          for (let i = 0; i <= nRackPts; i++) {
+            const x = -rackHalfW + (i / nRackPts) * rackHalfW * 2;
+            const toothPhase = (x + sim.rackOffX * scale) / rackToothPitch;
+            const profile = 0.5 * (1 - Math.cos(toothPhase * TWO_PI));
+            ctx.lineTo(x, yBase + dir * toothH * profile);
+          }
+          ctx.lineTo(rackHalfW, yBase);
+          ctx.closePath();
+          ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
+          ctx.lineWidth = 1.3;
+          ctx.stroke();
+          ctx.fillStyle = "rgba(200, 215, 245, 0.07)";
+          ctx.fill();
+          ctx.restore();
+        };
+        drawTeeth(barCY - barHalf, -1);
+        drawTeeth(barCY + barHalf,  1);
+      }
 
       // Contact dot — on whichever edge the gear is currently touching
-      const isBottomPass = mcyS > 0;
-      const contactY = isBottomPass ? barCY + barHalf : barCY - barHalf;
+      const profileAtGear = getProfileY(mcxS);
+      const isBottomPass = mcyS > barCY + profileAtGear;
+      const contactY = isBottomPass ? barCY + profileAtGear + barHalf : barCY + profileAtGear - barHalf;
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
@@ -1875,6 +1917,7 @@ export default function SpirographPage() {
       {drawShapeFor !== null && (
         <DrawShapeModal
           target={drawShapeFor}
+          isRack={meshMode === "rack"}
           onDone={handleDrawDone}
           onCancel={() => setDrawShapeFor(null)}
         />

@@ -151,7 +151,22 @@ export function computeMeshState(
     const arcLen = movingBaseR * phi;
     const psi    = angleForArcLength(movingTable, arcLen);
     const cx = arcLen;
-    const cy = -movingBaseR;
+
+    // Custom rack y-profile: values -1..1, scaled by movingBaseR * 0.5.
+    // RACK_MAX_PHI = RACK_CYCLES(2) * TWO_PI = 4π — full rack span.
+    let rackYOff = 0;
+    if (customFixedRTable && customFixedRTable.length > 0) {
+      const N = customFixedRTable.length;
+      const RACK_MAX_PHI = 4 * Math.PI;
+      const t   = ((phi % RACK_MAX_PHI) + RACK_MAX_PHI) % RACK_MAX_PHI / RACK_MAX_PHI;
+      const idx = t * N;
+      const lo  = Math.floor(idx) % N;
+      const hi  = (lo + 1) % N;
+      const frac = idx - Math.floor(idx);
+      rackYOff = (customFixedRTable[lo] * (1 - frac) + customFixedRTable[hi] * frac) * movingBaseR * 0.5;
+    }
+
+    const cy = rackYOff - movingBaseR;
     const penAngleWorld = psi;
     const d  = penOffset * movingBaseR;
     return {
