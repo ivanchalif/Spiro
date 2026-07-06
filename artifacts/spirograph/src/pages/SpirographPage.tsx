@@ -1148,6 +1148,53 @@ export default function SpirographPage() {
   const handleMovingSides = useCallback((v: number)    => { setMovingSides(v); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, v, c.gear, c.mode, effectivePenOffset); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
   const handlePenOffset   = useCallback((v: number)    => { setPenOffset(v);   const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, v); }, [fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ─── Classic Loops (photo pattern) handler ───────────────────────────────────
+  // Replicates the 3-loop epicycloid from the physical spirograph photo:
+  // small gear (40T, radius 50) orbiting outside a circular hub, pen at 92%
+  const handleClassicLoops = useCallback(() => {
+    const fShape: GearShape = "circle";
+    const mShape: GearShape = "circle";
+    const fEcc   = 0;
+    const mEcc   = 0;
+    const fSides = 6;
+    const mSides = 6;
+    const penOff = 0.92;
+    const loopGearIdx   = 2; // "Small" preset — 40T, radius 50
+    const loopGearRatio = 32; // ~32% of 155 = radius 50 → 40T → exactly 3 loops outside
+
+    setFixedShape(fShape);
+    setFixedEcc(fEcc);
+    setFixedSides(fSides);
+    setMovingShape(mShape);
+    setMovingEcc(mEcc);
+    setMovingSides(mSides);
+    setPenOffset(penOff);
+    setGearIdx(loopGearIdx);
+    setGearRatio(loopGearRatio);
+    setMeshMode("external");
+
+    const gear = makeEffectiveGear(loopGearIdx, loopGearRatio);
+    rebuildTables(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, "external");
+    drawGhost(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, "external", penOff, penColor, penWeight, penCount,
+      nestedEnabled, gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
+
+    simRef.current.phi = 0;
+    hueRef.current = 0;
+    const startColor = rainbow ? "hsl(0,85%,62%)" : penColor;
+    const newRun: TraceRun = { points: [], color: startColor, weight: penWeight };
+    currentRunRef.current = newRun;
+    traceRunsRef.current.push(newRun);
+    extraRunsRef.current = [];
+    for (let ri = 0; ri < penCount - 1; ri++) {
+      const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
+      const extraRun: TraceRun = { points: [], color: ringColor, weight: penWeight };
+      extraRunsRef.current.push(extraRun);
+      traceRunsRef.current.push(extraRun);
+    }
+    setHasTrace(true);
+    setIsPlaying(true);
+  }, [penColor, penWeight, penCount, rainbow, nestedEnabled, nestedRatio, nestedSpeed, nestedPenOffset, rebuildTables, drawGhost]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ─── Randomize handler ───────────────────────────────────────────────────────
   const handleRandomize = useCallback(() => {
     const shapes: GearShape[] = ["circle", "ellipse", "polygon"];
@@ -1501,6 +1548,29 @@ export default function SpirographPage() {
             </button>
             <p className="text-[10px] text-muted-foreground/50 mt-1.5 leading-tight">
               Randomizes both gear shapes, eccentricities &amp; pen offset, then draws.
+            </p>
+
+            {/* Classic Loops */}
+            <button
+              onClick={handleClassicLoops}
+              disabled={isPlaying}
+              className={[
+                "w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all mt-2",
+                isPlaying
+                  ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
+                  : "border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/60 active:scale-95",
+              ].join(" ")}
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-none stroke-current" strokeWidth="1.8" aria-hidden="true">
+                <circle cx="12" cy="12" r="3.5" />
+                <circle cx="12" cy="5"  r="2.5" />
+                <circle cx="18.1" cy="15.5" r="2.5" />
+                <circle cx="5.9"  cy="15.5" r="2.5" />
+              </svg>
+              Classic Loops
+            </button>
+            <p className="text-[10px] text-muted-foreground/50 mt-1 leading-tight">
+              3-loop epicycloid — the classic spirograph photo pattern.
             </p>
           </section>
 
