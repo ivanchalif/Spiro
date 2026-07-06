@@ -1,4 +1,4 @@
-export type GearShape = "circle" | "ellipse" | "polygon";
+export type GearShape = "circle" | "ellipse" | "polygon" | "custom";
 export type MeshMode  = "internal" | "external" | "rack";
 
 const TWO_PI = 2 * Math.PI;
@@ -8,8 +8,19 @@ export function gearRadius(
   baseR: number,
   ecc: number,
   theta: number,
-  sides = 5
+  sides = 5,
+  customRTable?: Float64Array | null,
 ): number {
+  if (shape === "custom") {
+    if (!customRTable || customRTable.length === 0) return baseR;
+    const N    = customRTable.length;
+    const norm = ((theta % TWO_PI) + TWO_PI) % TWO_PI;
+    const idx  = (norm / TWO_PI) * N;
+    const lo   = Math.floor(idx) % N;
+    const hi   = (lo + 1) % N;
+    const frac = idx - Math.floor(idx);
+    return (customRTable[lo] * (1 - frac) + customRTable[hi] * frac) * baseR;
+  }
   switch (shape) {
     case "circle":
       return baseR;
@@ -33,12 +44,13 @@ function integrand(
   baseR: number,
   ecc: number,
   t: number,
-  sides: number
+  sides: number,
+  customRTable?: Float64Array | null,
 ): number {
   const dt = 1e-5;
-  const r  = gearRadius(shape, baseR, ecc, t,      sides);
-  const rp = gearRadius(shape, baseR, ecc, t + dt, sides);
-  const rm = gearRadius(shape, baseR, ecc, t - dt, sides);
+  const r  = gearRadius(shape, baseR, ecc, t,      sides, customRTable);
+  const rp = gearRadius(shape, baseR, ecc, t + dt, sides, customRTable);
+  const rm = gearRadius(shape, baseR, ecc, t - dt, sides, customRTable);
   const dr = (rp - rm) / (2 * dt);
   return Math.sqrt(r * r + dr * dr);
 }
@@ -48,7 +60,8 @@ export function buildArcLengthTable(
   baseR: number,
   ecc: number,
   N = 1000,
-  sides = 5
+  sides = 5,
+  customRTable?: Float64Array | null,
 ): Float64Array<ArrayBuffer> {
   const table  = new Float64Array(N + 1) as Float64Array<ArrayBuffer>;
   const dTheta = TWO_PI / N;
@@ -60,9 +73,9 @@ export function buildArcLengthTable(
     table[i] =
       table[i - 1] +
       (dTheta / 6) *
-        (integrand(shape, baseR, ecc, t0, sides) +
-         4 * integrand(shape, baseR, ecc, tm, sides) +
-         integrand(shape, baseR, ecc, t1, sides));
+        (integrand(shape, baseR, ecc, t0, sides, customRTable) +
+         4 * integrand(shape, baseR, ecc, tm, sides, customRTable) +
+         integrand(shape, baseR, ecc, t1, sides, customRTable));
   }
   return table;
 }
@@ -120,6 +133,7 @@ function arcLengthAlongFixed(table: Float64Array, phi: number): number {
  *   "rack"     — trochoid:    moving gear rolls along a straight rack.
  *                The rack lies along y = 0; gear center at y = movingBaseR.
  *                x grows as phi increases (not periodic in screen space).
+ * customFixedRTable / customMovingRTable: normalized r(θ) for custom gear shapes.
  */
 export function computeMeshState(
   phi: number,
@@ -129,20 +143,16 @@ export function computeMeshState(
   movingTable: Float64Array, movingSides: number,
   penOffset: number,
   meshMode: MeshMode = "internal",
+  customFixedRTable?: Float64Array | null,
+  customMovingRTable?: Float64Array | null,
 ): GearMeshState {
   // ── Rack mode ────────────────────────────────────────────────────────────
   if (meshMode === "rack") {
-    // Arc on rack = distance rolled = movingBaseR × phi (for a circle).
-    // For NCG gears we still use movingBaseR × phi as the rack displacement
-    // and look up the correct gear angle from the moving table.
     const arcLen = movingBaseR * phi;
     const psi    = angleForArcLength(movingTable, arcLen);
-    // Screen convention: y increases downward.
-    // Rack lies at y = 0. Gear center is ABOVE the rack: y = -movingBaseR.
-    // As the gear rolls right, it rotates CW in screen coords → +psi.
     const cx = arcLen;
     const cy = -movingBaseR;
-    const penAngleWorld = psi; // CW rotation in screen coords
+    const penAngleWorld = psi;
     const d  = penOffset * movingBaseR;
     return {
       phi, psi, arcLenFixed: arcLen,
@@ -155,15 +165,14 @@ export function computeMeshState(
   // ── Shared arc-length lookup (internal / external) ───────────────────────
   const arcLen = arcLengthAlongFixed(fixedTable, phi);
   const psi    = angleForArcLength(movingTable, arcLen);
-  const Rf     = gearRadius(fixedShape,  fixedBaseR,  fixedEcc,  phi, fixedSides);
-  const Rm     = gearRadius(movingShape, movingBaseR, movingEcc, psi, movingSides);
+  const Rf     = gearRadius(fixedShape,  fixedBaseR,  fixedEcc,  phi, fixedSides,  customFixedRTable);
+  const Rm     = gearRadius(movingShape, movingBaseR, movingEcc, psi, movingSides, customMovingRTable);
 
   // ── External mode (epicycloid) ───────────────────────────────────────────
   if (meshMode === "external") {
     const centerDist = Rf + Rm;
     const cx = centerDist * Math.cos(phi);
     const cy = centerDist * Math.sin(phi);
-    // For epicycloid: pen angle = phi + psi + π (classical formula)
     const penAngleWorld = phi + psi + Math.PI;
     const d = penOffset * movingBaseR;
     return {
@@ -197,12 +206,13 @@ export function drawPolarCurve(
   cy: number,
   rotAngle: number,
   sides: number,
-  N = 360
+  N = 360,
+  customRTable?: Float64Array | null,
 ): void {
   ctx.beginPath();
   for (let i = 0; i <= N; i++) {
     const t          = (i / N) * TWO_PI;
-    const r          = gearRadius(shape, baseR, ecc, t, sides);
+    const r          = gearRadius(shape, baseR, ecc, t, sides, customRTable);
     const worldAngle = t + rotAngle;
     if (i === 0) ctx.moveTo(cx + r * Math.cos(worldAngle), cy + r * Math.sin(worldAngle));
     else         ctx.lineTo(cx + r * Math.cos(worldAngle), cy + r * Math.sin(worldAngle));

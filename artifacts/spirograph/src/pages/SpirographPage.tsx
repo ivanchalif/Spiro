@@ -7,6 +7,7 @@ import {
   type GearShape,
   type MeshMode,
 } from "@/lib/gearMath";
+import { DrawShapeModal } from "@/components/DrawShapeModal";
 
 const TWO_PI = 2 * Math.PI;
 const TABLE_N = 800;
@@ -280,30 +281,47 @@ function ControlSlider({ label, value, min, max, step, onChange, onInput, displa
 // ─── Shape + ecc + sides section ─────────────────────────────────────────────
 interface GearShapeSectionProps {
   label: string; shape: GearShape; ecc: number; sides: number; disabled?: boolean;
-  onShapeChange: (s: GearShape) => void;
-  onEccChange:   (v: number)    => void;
-  onEccInput:    (v: number)    => void;
-  onSidesChange: (v: number)    => void;
-  onSidesInput:  (v: number)    => void;
+  hasCustomShape?: boolean;
+  onShapeChange:  (s: GearShape) => void;
+  onEccChange:    (v: number)    => void;
+  onEccInput:     (v: number)    => void;
+  onSidesChange:  (v: number)    => void;
+  onSidesInput:   (v: number)    => void;
+  onDrawCustom?:  () => void;
 }
-function GearShapeSection({ label, shape, ecc, sides, disabled,
-  onShapeChange, onEccChange, onEccInput, onSidesChange, onSidesInput,
+function GearShapeSection({ label, shape, ecc, sides, disabled, hasCustomShape,
+  onShapeChange, onEccChange, onEccInput, onSidesChange, onSidesInput, onDrawCustom,
 }: GearShapeSectionProps) {
   const POLYGON_NAMES: Record<number, string> = { 3:"▲ Tri", 4:"■ Sq", 5:"⬠ Pent", 6:"⬡ Hex", 7:"Hept", 8:"Oct" };
   return (
     <section className="flex flex-col gap-2">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</p>
       <div className="flex gap-1">
-        {(["circle", "ellipse", "polygon"] as GearShape[]).map((s) => (
+        {(["circle", "ellipse", "polygon", "custom"] as GearShape[]).map((s) => (
           <button key={s} onClick={() => onShapeChange(s)} disabled={disabled}
             className={["px-2 py-1 rounded text-[10px] font-medium flex-1 border transition-all",
               shape === s ? "bg-primary/14 text-primary border-primary/25"
                 : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
               disabled ? "opacity-40 cursor-not-allowed" : ""].join(" ")}>
-            {s.charAt(0).toUpperCase() + s.slice(1)}
+            {s === "custom" ? "✏ Draw" : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
       </div>
+      {shape === "custom" && (
+        <button
+          onClick={onDrawCustom}
+          disabled={disabled}
+          className={[
+            "w-full py-1.5 rounded text-[10px] font-semibold border transition-all",
+            hasCustomShape
+              ? "border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10"
+              : "border-primary/30 text-primary hover:bg-primary/10",
+            disabled ? "opacity-40 cursor-not-allowed" : "",
+          ].join(" ")}
+        >
+          {hasCustomShape ? "✓ Shape drawn — redraw?" : "Open drawing canvas →"}
+        </button>
+      )}
       {shape === "polygon" && (
         <div className="flex flex-col gap-2">
           {/* Sides picker — 3-side to 8-side buttons */}
@@ -378,6 +396,13 @@ export default function SpirographPage() {
   // 3-body refs
   const nbodyBodiesRef = useRef<NBodyState[]>([]);
   const nbodyTrailsRef = useRef<{ x: number; y: number }[][]>([[], [], []]);
+  // Custom shape refs — stable mutable refs so callbacks always see latest
+  const customFixedRRef  = useRef<Float64Array | null>(null);
+  const customMovingRRef = useRef<Float64Array | null>(null);
+  // Custom shape UI state
+  const [drawShapeFor,  setDrawShapeFor]  = useState<"fixed" | "moving" | null>(null);
+  const [hasCustomFixed,  setHasCustomFixed]  = useState(false);
+  const [hasCustomMoving, setHasCustomMoving] = useState(false);
 
   const simRef = useRef({
     phi: 0,
@@ -403,8 +428,8 @@ export default function SpirographPage() {
     gear: GearPreset, mode: MeshMode,
   ) => {
     const sim = simRef.current;
-    sim.fixedTable   = buildArcLengthTable(fShape, FIXED_BASE_R, fEcc, TABLE_N, fSides);
-    sim.movingTable  = buildArcLengthTable(mShape, gear.radius,  mEcc, TABLE_N, mSides);
+    sim.fixedTable   = buildArcLengthTable(fShape, FIXED_BASE_R, fEcc, TABLE_N, fSides, customFixedRRef.current);
+    sim.movingTable  = buildArcLengthTable(mShape, gear.radius,  mEcc, TABLE_N, mSides, customMovingRRef.current);
     sim.fixedShape   = fShape; sim.fixedEcc   = fEcc; sim.fixedSides  = fSides;
     sim.movingShape  = mShape; sim.movingEcc  = mEcc; sim.movingSides = mSides;
     sim.meshMode     = mode;
@@ -440,6 +465,10 @@ export default function SpirographPage() {
     const gear = sim.gear;
     const W = canvas.width, H = canvas.height;
     const cx = W / 2, cy = H / 2;
+
+    // Custom shape tables (mutable refs — always current, no dep needed)
+    const customFixedRT  = customFixedRRef.current;
+    const customMovingRT = customMovingRRef.current;
 
     // World-to-screen coordinate offset (rack mode shifts origin)
     const offX = sim.meshMode === "rack" ? sim.rackOffX : 0;
@@ -578,7 +607,7 @@ export default function SpirographPage() {
       ctx.restore();
 
       // Contact point
-      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides);
+      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides, customFixedRT);
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
@@ -593,21 +622,17 @@ export default function SpirographPage() {
       ctx.beginPath();
       for (let i = 0; i <= fixedSamples; i++) {
         const t = (i / fixedSamples) * TWO_PI;
-        const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.fixedEcc, t, sim.fixedSides);
+        const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.fixedEcc, t, sim.fixedSides, customFixedRT);
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
       ctx.closePath();
-      // Inner toothed edge of ring.
-      // Formula: r = base + toothH/2·(1 + cos(t·N))
-      //   → space between teeth at base+toothH (ring root)
-      //   → tooth tip at base (pointing inward)
-      // Gear teeth: base to base+toothH outward, with +π phase shift.
-      // At contact: ring_profile + gear_profile = 1 → perfect interlock, zero overlap.
       for (let i = 0; i <= fixedSamples; i++) {
         const t    = (i / fixedSamples) * TWO_PI;
-        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
-        const r    = base + toothH * 0.5 * (1 + Math.cos(t * FIXED_TEETH));
+        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides, customFixedRT);
+        const r    = sim.fixedShape === "custom"
+          ? base  // custom: no teeth — just the profile
+          : base + toothH * 0.5 * (1 + Math.cos(t * FIXED_TEETH));
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
@@ -620,7 +645,7 @@ export default function SpirographPage() {
       ctx.beginPath();
       for (let i = 0; i <= fixedSamples; i++) {
         const t = (i / fixedSamples) * TWO_PI;
-        const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.fixedEcc, t, sim.fixedSides);
+        const r = gearRadius(sim.fixedShape, fixedR + ringW, sim.fixedEcc, t, sim.fixedSides, customFixedRT);
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
@@ -629,15 +654,17 @@ export default function SpirographPage() {
       ctx.lineWidth = 1; ctx.stroke();
       ctx.restore();
 
-      // Inner toothed edge stroke (same formula as the fill path above)
+      // Inner edge stroke
       ctx.save();
       ctx.shadowColor = "rgba(160, 175, 255, 0.25)";
       ctx.shadowBlur  = 6;
       ctx.beginPath();
       for (let i = 0; i <= fixedSamples; i++) {
         const t    = (i / fixedSamples) * TWO_PI;
-        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
-        const r    = base + toothH * 0.5 * (1 + Math.cos(t * FIXED_TEETH));
+        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides, customFixedRT);
+        const r    = sim.fixedShape === "custom"
+          ? base
+          : base + toothH * 0.5 * (1 + Math.cos(t * FIXED_TEETH));
         if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
         else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
       }
@@ -647,7 +674,7 @@ export default function SpirographPage() {
       ctx.restore();
 
       // Contact point
-      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides);
+      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides, customFixedRT);
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
@@ -673,12 +700,14 @@ export default function SpirographPage() {
     ctx.fillStyle = gear.color + "18";
     ctx.fill();
 
-    // Toothed outline
+    // Toothed outline (or custom profile)
     ctx.beginPath();
     for (let i = 0; i <= movingSamples; i++) {
       const la   = (i / movingSamples) * TWO_PI;
-      const base = gearRadius(sim.movingShape, movingR, sim.movingEcc, la, sim.movingSides);
-      const r    = base + toothH * 0.5 * (1 - Math.cos(la * movingTeeth + Math.PI));
+      const base = gearRadius(sim.movingShape, movingR, sim.movingEcc, la, sim.movingSides, customMovingRT);
+      const r    = sim.movingShape === "custom"
+        ? base
+        : base + toothH * 0.5 * (1 - Math.cos(la * movingTeeth + Math.PI));
       const wa   = la + rotAngle;
       if (i === 0) ctx.moveTo(mcxS + r * Math.cos(wa), mcyS + r * Math.sin(wa));
       else         ctx.lineTo(mcxS + r * Math.cos(wa), mcyS + r * Math.sin(wa));
@@ -888,6 +917,7 @@ export default function SpirographPage() {
     const state0 = computeMeshState(
       idlePhi, fShape, FIXED_BASE_R, fEcc, ft, fSides,
       mShape, gear.radius, mEcc, mt, mSides, pOff, mode,
+      customFixedRRef.current, customMovingRRef.current,
     );
     // Show idle gear frame; nested gear not shown here (too expensive at idle)
     renderFrame(idlePhi, state0.psi, state0.movingCenterX, state0.movingCenterY,
@@ -913,6 +943,7 @@ export default function SpirographPage() {
         const st = computeMeshState(
           lph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
           mShape, gear.radius, mEcc, mt, mSides, ringOff, mode,
+          customFixedRRef.current, customMovingRRef.current,
         );
         let px: number, py: number;
         if (nestedOn) {
@@ -974,6 +1005,8 @@ export default function SpirographPage() {
     const capNR2     = capGear.radius * nestedRatio / 100;  // nested gear radius in world units
     const capNN      = nestedSpeed;
     const capND      = nestedPenOffset;
+    const capCustomFixedR  = customFixedRRef.current;
+    const capCustomMovingR = customMovingRRef.current;
 
     const ratio  = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
     const baseLoops = closureLoops(ratio);
@@ -996,6 +1029,7 @@ export default function SpirographPage() {
         capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
         capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
         capPen, capMode,
+        capCustomFixedR, capCustomMovingR,
       );
 
       // Effective positions: mirror X and flip Y for bottom pass
@@ -1048,6 +1082,7 @@ export default function SpirographPage() {
             capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
             capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
             off, capMode,
+            capCustomFixedR, capCustomMovingR,
           );
           const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
           const rPenX = rackBottom ? rackMaxCX - st.penX : st.penX;
@@ -1394,6 +1429,30 @@ export default function SpirographPage() {
   }, [stopPlay, drawingEngine, gearIdx, gearRatio, meshMode, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides,
       effectivePenOffset, penColor, drawIdle]);
 
+  // ─── Custom shape handler ─────────────────────────────────────────────────
+  const handleDrawDone = useCallback((table: Float64Array) => {
+    if (drawShapeFor === "fixed") {
+      customFixedRRef.current = table;
+      setHasCustomFixed(true);
+      setFixedShape("custom");
+      const c = cur();
+      rebuildTables("custom", c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode);
+      if (!isPlaying) drawGhost("custom", c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode,
+        effectivePenOffset, penColor, penWeight, penCount,
+        nestedEnabled, c.gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
+    } else if (drawShapeFor === "moving") {
+      customMovingRRef.current = table;
+      setHasCustomMoving(true);
+      setMovingShape("custom");
+      const c = cur();
+      rebuildTables(c.fShape, c.fEcc, c.fSides, "custom", c.mEcc, c.mSides, c.gear, c.mode);
+      if (!isPlaying) drawGhost(c.fShape, c.fEcc, c.fSides, "custom", c.mEcc, c.mSides, c.gear, c.mode,
+        effectivePenOffset, penColor, penWeight, penCount,
+        nestedEnabled, c.gear.radius * nestedRatio / 100, nestedSpeed, nestedPenOffset);
+    }
+    setDrawShapeFor(null);
+  }, [drawShapeFor, isPlaying, cur, rebuildTables, drawGhost, effectivePenOffset, penColor, penWeight, penCount, nestedEnabled, nestedRatio, nestedSpeed, nestedPenOffset]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const selectedGear = GEAR_PRESETS[gearIdx];
   const computedGear = makeEffectiveGear(gearIdx, gearRatio);
 
@@ -1629,8 +1688,10 @@ export default function SpirographPage() {
             </div>
             <GearShapeSection
               label="Shape" shape={fixedShape} ecc={fixedEcc} sides={fixedSides} disabled={isPlaying}
+              hasCustomShape={hasCustomFixed}
               onShapeChange={handleFixedShape} onEccChange={handleFixedEcc} onEccInput={handleFixedEcc}
               onSidesChange={handleFixedSides} onSidesInput={handleFixedSides}
+              onDrawCustom={() => setDrawShapeFor("fixed")}
             />
           </div>
 
@@ -1644,8 +1705,10 @@ export default function SpirographPage() {
             </div>
             <GearShapeSection
               label="Shape" shape={movingShape} ecc={movingEcc} sides={movingSides} disabled={isPlaying}
+              hasCustomShape={hasCustomMoving}
               onShapeChange={handleMovingShape} onEccChange={handleMovingEcc} onEccInput={handleMovingEcc}
               onSidesChange={handleMovingSides} onSidesInput={handleMovingSides}
+              onDrawCustom={() => setDrawShapeFor("moving")}
             />
           </div>
 
@@ -1904,6 +1967,14 @@ export default function SpirographPage() {
           </div>
         )}
       </main>
+
+      {drawShapeFor !== null && (
+        <DrawShapeModal
+          target={drawShapeFor}
+          onDone={handleDrawDone}
+          onCancel={() => setDrawShapeFor(null)}
+        />
+      )}
     </div>
   );
 }
