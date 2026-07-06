@@ -282,6 +282,7 @@ function ControlSlider({ label, value, min, max, step, onChange, onInput, displa
 interface GearShapeSectionProps {
   label: string; shape: GearShape; ecc: number; sides: number; disabled?: boolean;
   hasCustomShape?: boolean;
+  showDraw?: boolean;
   onShapeChange:  (s: GearShape) => void;
   onEccChange:    (v: number)    => void;
   onEccInput:     (v: number)    => void;
@@ -289,15 +290,16 @@ interface GearShapeSectionProps {
   onSidesInput:   (v: number)    => void;
   onDrawCustom?:  () => void;
 }
-function GearShapeSection({ label, shape, ecc, sides, disabled, hasCustomShape,
+function GearShapeSection({ label, shape, ecc, sides, disabled, hasCustomShape, showDraw,
   onShapeChange, onEccChange, onEccInput, onSidesChange, onSidesInput, onDrawCustom,
 }: GearShapeSectionProps) {
   const POLYGON_NAMES: Record<number, string> = { 3:"▲ Tri", 4:"■ Sq", 5:"⬠ Pent", 6:"⬡ Hex", 7:"Hept", 8:"Oct" };
+  const shapes: GearShape[] = showDraw ? ["circle", "ellipse", "polygon", "custom"] : ["circle", "ellipse", "polygon"];
   return (
     <section className="flex flex-col gap-2">
       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{label}</p>
       <div className="flex gap-1">
-        {(["circle", "ellipse", "polygon", "custom"] as GearShape[]).map((s) => (
+        {shapes.map((s) => (
           <button key={s} onClick={() => onShapeChange(s)} disabled={disabled}
             className={["px-2 py-1 rounded text-[10px] font-medium flex-1 border transition-all",
               shape === s ? "bg-primary/14 text-primary border-primary/25"
@@ -1174,7 +1176,12 @@ export default function SpirographPage() {
   const handleMeshMode = useCallback((mode: MeshMode) => {
     setMeshMode(mode);
     const { fShape, fEcc, fSides, mShape, mEcc, mSides, gear } = cur();
-    if (!isPlaying) applyGearParams(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, mode, effectivePenOffset);
+    // Reset custom shapes when leaving rack mode — custom only makes sense on the rack
+    const ef = mode !== "rack" && fShape === "custom" ? "circle" : fShape;
+    const em = mode !== "rack" && mShape === "custom" ? "circle" : mShape;
+    if (ef !== fShape) setFixedShape("circle");
+    if (em !== mShape) setMovingShape("circle");
+    if (!isPlaying) applyGearParams(ef, fEcc, fSides, em, mEcc, mSides, gear, mode, effectivePenOffset);
   }, [isPlaying, fixedShape, fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleFixedShape  = useCallback((s: GearShape) => { setFixedShape(s);  const c = cur(); applyGearParams(s, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, effectivePenOffset); }, [fixedEcc, fixedSides, movingShape, movingEcc, movingSides, gearIdx, gearRatio, meshMode, effectivePenOffset, applyGearParams]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1632,7 +1639,7 @@ export default function SpirographPage() {
               </div>
               <GearShapeSection
                 label="" shape={fixedShape} ecc={fixedEcc} sides={fixedSides} disabled={isPlaying}
-                hasCustomShape={hasCustomFixed}
+                hasCustomShape={hasCustomFixed} showDraw={meshMode === "rack"}
                 onShapeChange={handleFixedShape} onEccChange={handleFixedEcc} onEccInput={handleFixedEcc}
                 onSidesChange={handleFixedSides} onSidesInput={handleFixedSides}
                 onDrawCustom={() => setDrawShapeFor("fixed")}
@@ -1646,7 +1653,7 @@ export default function SpirographPage() {
               </div>
               <GearShapeSection
                 label="" shape={movingShape} ecc={movingEcc} sides={movingSides} disabled={isPlaying}
-                hasCustomShape={hasCustomMoving}
+                hasCustomShape={hasCustomMoving} showDraw={meshMode === "rack"}
                 onShapeChange={handleMovingShape} onEccChange={handleMovingEcc} onEccInput={handleMovingEcc}
                 onSidesChange={handleMovingSides} onSidesInput={handleMovingSides}
                 onDrawCustom={() => setDrawShapeFor("moving")}
