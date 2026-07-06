@@ -184,8 +184,10 @@ function computeNestedGear(
   const phi2_world = theta1 + N * phi;
   const centerX = c1x + (r1 - r2) * Math.cos(phi2_world);
   const centerY = c1y + (r1 - r2) * Math.sin(phi2_world);
-  // Rolling without slip: nested gear rotation = theta1 - N*phi*(r1/r2)
-  const theta2 = theta1 - N * phi * (r1 / r2);
+  // Rolling without slip: nested gear rotation = theta1 - N*phi*(r1/r2 - 1)
+  // Derivation: in gear 1's local frame, rolling on its inner rim gives
+  // omega_nested = -(r1/r2 - 1)*omega_orbit. In world frame add theta1.
+  const theta2 = theta1 - N * phi * (r1 / r2 - 1);
   return {
     centerX, centerY, theta2,
     penX: centerX + d * r2 * Math.cos(theta2),
