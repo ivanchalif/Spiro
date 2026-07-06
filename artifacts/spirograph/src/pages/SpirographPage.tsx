@@ -303,7 +303,7 @@ function GearShapeSection({ label, shape, ecc, sides, disabled, hasCustomShape,
               shape === s ? "bg-primary/14 text-primary border-primary/25"
                 : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
               disabled ? "opacity-40 cursor-not-allowed" : ""].join(" ")}>
-            {s === "custom" ? "✏ Draw" : s.charAt(0).toUpperCase() + s.slice(1)}
+            {s === "custom" ? "Draw" : s.charAt(0).toUpperCase() + s.slice(1)}
           </button>
         ))}
       </div>
@@ -1466,108 +1466,95 @@ export default function SpirographPage() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
 
       {/* ── Sidebar ── */}
-      <aside className="w-64 shrink-0 flex flex-col border-r border-border bg-card overflow-y-auto">
-        <div className="px-5 pt-5 pb-4 border-b border-border">
-          <div className="flex items-center gap-2.5">
-            <div className="w-7 h-7 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center">
-              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="9" className="stroke-primary/40" />
-                <circle cx="12" cy="12" r="5" className="stroke-primary/70" />
-                <circle cx="12" cy="12" r="1.5" className="fill-primary stroke-none" />
-              </svg>
-            </div>
-            <div>
-              <h1 className="text-sm font-semibold tracking-tight">Spirograph NCG</h1>
-              <p className="text-[10px] text-muted-foreground">Non-Circular Gear Engine</p>
-            </div>
+      <aside className="w-60 shrink-0 flex flex-col border-r border-border bg-card overflow-y-auto">
+
+        {/* Header */}
+        <div className="px-4 pt-3.5 pb-3 border-b border-border flex items-center gap-2 shrink-0">
+          <div className="w-6 h-6 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center shrink-0">
+            <svg viewBox="0 0 24 24" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="12" cy="12" r="9" className="stroke-primary/40" />
+              <circle cx="12" cy="12" r="5" className="stroke-primary/70" />
+              <circle cx="12" cy="12" r="1.5" className="fill-primary stroke-none" />
+            </svg>
           </div>
+          <h1 className="text-[11px] font-semibold tracking-tight leading-none">Spirograph NCG</h1>
         </div>
 
-        <div className="flex flex-col gap-4 px-4 py-4 flex-1">
+        <div className="flex flex-col gap-3 px-3 py-3 flex-1">
 
-          {/* ── Engine toggle ─────────────────────────────────────── */}
-          <section>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Engine</p>
-            <div className="flex gap-1">
-              {(["spirograph", "threebody"] as const).map((eng) => (
-                <button key={eng} disabled={isPlaying}
-                  onClick={() => { if (eng !== drawingEngine) { stopPlay(); setDrawingEngine(eng); nbodyBodiesRef.current = []; nbodyTrailsRef.current = [[], [], []]; } }}
-                  className={["flex-1 py-1.5 rounded text-[10px] font-semibold border transition-all",
-                    drawingEngine === eng
-                      ? "bg-primary/14 text-primary border-primary/25"
-                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
-                    isPlaying ? "opacity-40 cursor-not-allowed" : "",
-                  ].join(" ")}>
-                  {eng === "spirograph" ? "Spirograph" : "3-Body"}
-                </button>
-              ))}
-            </div>
-          </section>
+          {/* ── Engine toggle ──────────────────────────────────── */}
+          <div className="flex gap-1">
+            {(["spirograph", "threebody"] as const).map((eng) => (
+              <button key={eng} disabled={isPlaying}
+                onClick={() => { if (eng !== drawingEngine) { stopPlay(); setDrawingEngine(eng); nbodyBodiesRef.current = []; nbodyTrailsRef.current = [[], [], []]; } }}
+                className={["flex-1 py-1.5 rounded text-[10px] font-semibold border transition-all",
+                  drawingEngine === eng
+                    ? "bg-primary/14 text-primary border-primary/25"
+                    : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                  isPlaying ? "opacity-40 cursor-not-allowed" : "",
+                ].join(" ")}>
+                {eng === "spirograph" ? "Spirograph" : "3-Body"}
+              </button>
+            ))}
+          </div>
 
-          <div className="border-t border-border/50" />
+          <div className="border-t border-border/40" />
 
           {/* ═══════════ 3-BODY CONTROLS ═══════════ */}
           {drawingEngine === "threebody" && (<>
 
-            <section className="flex flex-col gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Preset</p>
-              <div className="flex flex-col gap-1">
+            <section className="flex flex-col gap-1.5">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Preset</p>
+              <div className="flex flex-col gap-0.5">
                 {Object.entries(NBODY_PRESETS).map(([key, p]) => (
                   <button key={key} disabled={isPlaying}
                     onClick={() => { setNbodyPreset(key); nbodyBodiesRef.current = []; nbodyTrailsRef.current = [[], [], []]; }}
-                    className={["w-full text-left px-2.5 py-1.5 rounded-md text-[10px] border transition-all",
+                    className={["w-full text-left px-2 py-1.5 rounded text-[10px] border transition-all",
                       nbodyPreset === key
                         ? "bg-primary/14 text-primary border-primary/25"
                         : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
                       isPlaying ? "opacity-40 cursor-not-allowed" : "",
                     ].join(" ")}>
                     <span className="font-semibold">{p.name}</span>
-                    <span className="opacity-60 ml-1">— {p.desc}</span>
+                    <span className="opacity-50 ml-1 text-[9px]">— {p.desc}</span>
                   </button>
                 ))}
               </div>
             </section>
 
-            <div className="border-t border-border/50" />
+            <div className="border-t border-border/40" />
 
-            <section className="flex flex-col gap-2">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Bodies</p>
-              <div className="flex gap-3 items-center">
-                {NBODY_COLORS.map((col, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded-full border border-white/20" style={{ background: col }} />
-                    <span className="text-[10px] text-muted-foreground">{["α","β","γ"][i]}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+            <div className="flex items-center gap-3">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground shrink-0">Bodies</p>
+              {NBODY_COLORS.map((col, i) => (
+                <div key={i} className="flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-full border border-white/20" style={{ background: col }} />
+                  <span className="text-[10px] text-muted-foreground">{["α","β","γ"][i]}</span>
+                </div>
+              ))}
+            </div>
 
-            <div className="border-t border-border/50" />
+            <div className="border-t border-border/40" />
 
-            <section className="flex flex-col gap-2">
-              <ControlSlider label="Trail Length" value={nbodyTrail} min={100} max={4000} step={100}
+            <div className="flex flex-col gap-1.5">
+              <ControlSlider label="Trail" value={nbodyTrail} min={100} max={4000} step={100}
                 onChange={setNbodyTrail} display={(v) => `${v} pts`} />
               <ControlSlider label="Speed" value={nbodySteps} min={1} max={20} step={1}
-                onChange={setNbodySteps} display={(v) => `${v}× steps/frame`} />
-            </section>
+                onChange={setNbodySteps} display={(v) => `${v}×`} />
+            </div>
 
-            <div className="border-t border-border/50" />
-
-            <section>
-              <button onClick={clearAll}
-                className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/25 transition-colors">
-                Reset Simulation
-              </button>
-            </section>
+            <button onClick={clearAll}
+              className="w-full px-3 py-1.5 rounded text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground transition-colors">
+              Reset Simulation
+            </button>
 
           </>)}
 
           {/* ═══════════ SPIROGRAPH CONTROLS ═══════════ */}
           {drawingEngine === "spirograph" && (<>
 
-          {/* ── Mesh Mode ─────────────────────────────────────────── */}
-          <section>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Mode</p>
+          {/* Mode + Presets row */}
+          <div className="flex flex-col gap-2">
             <div className="flex gap-1">
               {MESH_OPTIONS.map(({ mode, label, title }) => (
                 <button key={mode} onClick={() => handleMeshMode(mode)} title={title} disabled={isPlaying}
@@ -1581,150 +1568,104 @@ export default function SpirographPage() {
                 </button>
               ))}
             </div>
-            <p className="text-[10px] text-muted-foreground/50 mt-1">
-              {meshMode === "internal" ? "Gear inside ring — hypocycloid"
-               : meshMode === "external" ? "Gear orbits hub — epicycloid"
-               : "Gear on straight bar — trochoid"}
-            </p>
-          </section>
+            <div className="flex gap-1">
+              <button onClick={handleRandomize} disabled={isPlaying}
+                className={["flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-semibold border transition-all",
+                  isPlaying ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
+                    : "border-primary/30 text-primary hover:bg-primary/10 active:scale-95"].join(" ")}>
+                <svg viewBox="0 0 24 24" className="w-3 h-3 fill-current shrink-0">
+                  <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
+                </svg>
+                Surprise
+              </button>
+              <button onClick={handleClassicLoops} disabled={isPlaying}
+                className={["flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-semibold border transition-all",
+                  isPlaying ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
+                    : "border-amber-500/40 text-amber-400 hover:bg-amber-500/10 active:scale-95"].join(" ")}>
+                <svg viewBox="0 0 24 24" className="w-3 h-3 fill-none stroke-current shrink-0" strokeWidth="2">
+                  <circle cx="12" cy="12" r="3" /><circle cx="12" cy="5" r="2" />
+                  <circle cx="18" cy="15.5" r="2" /><circle cx="6" cy="15.5" r="2" />
+                </svg>
+                Classic
+              </button>
+            </div>
+          </div>
 
-          <div className="border-t border-border/50" />
+          <div className="border-t border-border/40" />
 
-          {/* ── Surprise Me ──────────────────────────────────────── */}
-          <section>
-            <button
-              onClick={handleRandomize}
-              disabled={isPlaying}
-              className={[
-                "w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-lg text-xs font-semibold border transition-all",
-                isPlaying
-                  ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
-                  : "border-primary/30 text-primary hover:bg-primary/10 hover:border-primary/50 active:scale-95",
-              ].join(" ")}
-            >
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current" aria-hidden="true">
-                <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/>
-              </svg>
-              Surprise Me
-            </button>
-            <p className="text-[10px] text-muted-foreground/50 mt-1.5 leading-tight">
-              Randomizes both gear shapes, eccentricities &amp; pen offset, then draws.
-            </p>
-
-            {/* Classic Loops */}
-            <button
-              onClick={handleClassicLoops}
-              disabled={isPlaying}
-              className={[
-                "w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border transition-all mt-2",
-                isPlaying
-                  ? "opacity-40 cursor-not-allowed border-border text-muted-foreground"
-                  : "border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:border-amber-500/60 active:scale-95",
-              ].join(" ")}
-            >
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-none stroke-current" strokeWidth="1.8" aria-hidden="true">
-                <circle cx="12" cy="12" r="3.5" />
-                <circle cx="12" cy="5"  r="2.5" />
-                <circle cx="18.1" cy="15.5" r="2.5" />
-                <circle cx="5.9"  cy="15.5" r="2.5" />
-              </svg>
-              Classic Loops
-            </button>
-            <p className="text-[10px] text-muted-foreground/50 mt-1 leading-tight">
-              3-loop epicycloid — the classic spirograph photo pattern.
-            </p>
-          </section>
-
-          <div className="border-t border-border/50" />
-
-          {/* ── Gear Tray ────────────────────────────────────────── */}
-          <section>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Inner Gear</p>
-            <div className="grid grid-cols-4 gap-1.5 p-2 rounded-lg border border-border bg-background/40">
+          {/* ── Gear Tray ────────────────────────────────────── */}
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Inner Gear</p>
+              <span className="text-[9px] text-muted-foreground/50">{selectedGear.teeth}T · {selectedGear.name}</span>
+            </div>
+            <div className="grid grid-cols-4 gap-1 p-1.5 rounded-lg border border-border bg-background/40">
               {GEAR_PRESETS.map((gear, idx) => (
                 <button key={gear.id} onClick={() => handleGearSelect(idx)}
                   title={`${gear.teeth}T — ${gear.name}`}
-                  className={["flex items-center justify-center p-0.5 rounded-md transition-all duration-150",
+                  className={["flex items-center justify-center p-0.5 rounded transition-all duration-150",
                     idx === gearIdx ? "bg-white/6" : "hover:bg-white/4"].join(" ")}
                   style={idx === gearIdx ? { outline: `1.5px solid ${gear.color}55`, outlineOffset: "1px" } : undefined}>
-                  <GearIcon gear={gear} selected={idx === gearIdx} iconSize={44} />
+                  <GearIcon gear={gear} selected={idx === gearIdx} iconSize={36} />
                 </button>
               ))}
               <div className="flex items-center justify-center opacity-20">
-                <svg width="44" height="44" viewBox="0 0 44 44">
+                <svg width="36" height="36" viewBox="0 0 44 44">
                   <circle cx="22" cy="22" r="18" fill="none" stroke="white" strokeWidth="1" strokeDasharray="3 3" />
                 </svg>
               </div>
             </div>
-            <p className="text-[10px] text-muted-foreground/60 mt-1.5">
-              {selectedGear.teeth}T · {selectedGear.name} · color preset
-            </p>
-          </section>
-
-          {/* ── Gear Ratio ────────────────────────────────────────────── */}
-          <section className="flex flex-col gap-1.5">
-            <ControlSlider
-              label="Gear Ratio"
-              value={gearRatio}
-              min={20}
-              max={80}
-              step={1}
-              onChange={handleGearRatioInput}
-              onInput={handleGearRatioInput}
-              display={(v) => `${v}% · R${computedGear.radius}`}
-            />
-            <p className="text-[10px] text-muted-foreground/60">
-              Moving gear as % of outer ring · small = fine detail, ~65% = epicycloid
-            </p>
-          </section>
-
-          <div className="border-t border-border/50" />
-
-          {/* ── Outer Gear shape ─────────────────────────────────── */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-primary/60 shrink-0" />
-              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/70">Outer Gear</p>
-            </div>
-            <GearShapeSection
-              label="Shape" shape={fixedShape} ecc={fixedEcc} sides={fixedSides} disabled={isPlaying}
-              hasCustomShape={hasCustomFixed}
-              onShapeChange={handleFixedShape} onEccChange={handleFixedEcc} onEccInput={handleFixedEcc}
-              onSidesChange={handleFixedSides} onSidesInput={handleFixedSides}
-              onDrawCustom={() => setDrawShapeFor("fixed")}
-            />
+            <ControlSlider label="Ratio" value={gearRatio} min={20} max={80} step={1}
+              onChange={handleGearRatioInput} onInput={handleGearRatioInput}
+              display={(v) => `${v}% · R${computedGear.radius}`} />
           </div>
 
-          <div className="h-px bg-border/50" />
+          <div className="border-t border-border/40" />
 
-          {/* ── Inner Gear shape ─────────────────────────────────── */}
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-teal-400/60 shrink-0" />
-              <p className="text-[11px] font-bold uppercase tracking-widest text-foreground/70">Inner Gear</p>
+          {/* ── Gear Shapes ──────────────────────────────────── */}
+          <div className="flex flex-col gap-2">
+            {/* Outer gear shape */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary/60 shrink-0" />
+                <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Outer Ring</p>
+              </div>
+              <GearShapeSection
+                label="" shape={fixedShape} ecc={fixedEcc} sides={fixedSides} disabled={isPlaying}
+                hasCustomShape={hasCustomFixed}
+                onShapeChange={handleFixedShape} onEccChange={handleFixedEcc} onEccInput={handleFixedEcc}
+                onSidesChange={handleFixedSides} onSidesInput={handleFixedSides}
+                onDrawCustom={() => setDrawShapeFor("fixed")}
+              />
             </div>
-            <GearShapeSection
-              label="Shape" shape={movingShape} ecc={movingEcc} sides={movingSides} disabled={isPlaying}
-              hasCustomShape={hasCustomMoving}
-              onShapeChange={handleMovingShape} onEccChange={handleMovingEcc} onEccInput={handleMovingEcc}
-              onSidesChange={handleMovingSides} onSidesInput={handleMovingSides}
-              onDrawCustom={() => setDrawShapeFor("moving")}
-            />
+            {/* Inner gear shape */}
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-400/60 shrink-0" />
+                <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Inner Gear</p>
+              </div>
+              <GearShapeSection
+                label="" shape={movingShape} ecc={movingEcc} sides={movingSides} disabled={isPlaying}
+                hasCustomShape={hasCustomMoving}
+                onShapeChange={handleMovingShape} onEccChange={handleMovingEcc} onEccInput={handleMovingEcc}
+                onSidesChange={handleMovingSides} onSidesInput={handleMovingSides}
+                onDrawCustom={() => setDrawShapeFor("moving")}
+              />
+            </div>
           </div>
 
-          <div className="h-px bg-border/50" />
+          <div className="border-t border-border/40" />
 
-          {/* ── Pen controls ─────────────────────────────────────── */}
-          <section className="flex flex-col gap-2">
-            <div className="flex items-baseline justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Pen Position</p>
-            </div>
+          {/* ── Pen ──────────────────────────────────────────── */}
+          <div className="flex flex-col gap-2">
+            <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Pen</p>
+
+            {/* Position mode */}
             <div className="flex gap-1">
               {(["interior", "circumference"] as const).map((m) => (
                 <button key={m} onClick={() => { setPenMode(m); const c = cur(); applyGearParams(c.fShape, c.fEcc, c.fSides, c.mShape, c.mEcc, c.mSides, c.gear, c.mode, m === "circumference" ? 1.0 : penOffset); }} disabled={isPlaying}
-                  className={["flex-1 h-7 rounded text-[10px] font-semibold border transition-all capitalize",
-                    penMode === m
-                      ? "bg-primary/14 text-primary border-primary/25"
+                  className={["flex-1 h-6 rounded text-[10px] font-semibold border transition-all",
+                    penMode === m ? "bg-primary/14 text-primary border-primary/25"
                       : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
                     isPlaying ? "opacity-40 cursor-not-allowed" : "",
                   ].join(" ")}>
@@ -1732,166 +1673,123 @@ export default function SpirographPage() {
                 </button>
               ))}
             </div>
+
             {penMode === "interior" && (
-              <>
-                <ControlSlider label="Pen Offset" value={penOffset} min={0.01} max={0.99} step={0.01}
-                  onChange={(v) => setPenOffset(v)} onInput={handlePenOffset}
-                  display={(v) => `${Math.round(v * 100)}%`} />
-                <p className="text-[10px] text-muted-foreground/60 -mt-1">0% = center · 99% = near edge</p>
-              </>
+              <ControlSlider label="Offset" value={penOffset} min={0.01} max={0.99} step={0.01}
+                onChange={(v) => setPenOffset(v)} onInput={handlePenOffset}
+                display={(v) => `${Math.round(v * 100)}%`} />
             )}
-            {penMode === "circumference" && (
-              <p className="text-[10px] text-muted-foreground/60">Pen locked to gear edge (100%)</p>
-            )}
-          </section>
 
-          {/* ── Rings (multiple simultaneous pens) ───────────────── */}
-          <section className="flex flex-col gap-1.5">
-            <div className="flex items-baseline justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Rings</p>
-              <span className="text-[10px] font-mono text-foreground/50">{penCount}</span>
+            {/* Rings */}
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] text-muted-foreground shrink-0 w-10">Rings</span>
+              <div className="flex gap-0.5 flex-1">
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <button key={n} onClick={() => setPenCount(n)} disabled={isPlaying}
+                    className={["flex-1 h-6 rounded text-[10px] font-bold border transition-all",
+                      penCount === n ? "bg-primary/14 text-primary border-primary/25"
+                        : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
+                      isPlaying ? "opacity-40 cursor-not-allowed" : "",
+                    ].join(" ")}>
+                    {n}
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="flex gap-1">
-              {[1, 2, 3, 4, 5].map((n) => (
-                <button key={n} onClick={() => setPenCount(n)} disabled={isPlaying}
-                  className={["flex-1 h-7 rounded text-[10px] font-bold border transition-all",
-                    penCount === n
-                      ? "bg-primary/14 text-primary border-primary/25"
-                      : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
-                    isPlaying ? "opacity-40 cursor-not-allowed" : "",
-                  ].join(" ")}>
-                  {n}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground/50 leading-tight">
-              {penCount === 1 ? "Single pen" : `${penCount} pens · evenly spaced inward from offset`}
-            </p>
-          </section>
 
-          <section>
-            <ControlSlider label="Pen Weight" value={penWeight} min={0.5} max={10} step={0.5}
+            <ControlSlider label="Weight" value={penWeight} min={0.5} max={10} step={0.5}
               onChange={(v) => setPenWeight(v)} display={(v) => `${v}px`} />
-          </section>
 
-          {/* ── Ink Color + Rainbow ───────────────────────────────── */}
-          <section className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Ink Color</p>
-              <button onClick={() => setRainbow((v) => !v)}
-                className={["flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-all",
-                  rainbow ? "border-transparent text-white" : "border-border text-muted-foreground hover:text-foreground"].join(" ")}
-                style={rainbow ? { background: "linear-gradient(90deg,#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa,#f472b6)" } : undefined}>
-                ✦ Rainbow
-              </button>
-            </div>
-            <div className={["flex items-center gap-3 transition-opacity", rainbow ? "opacity-40 pointer-events-none" : ""].join(" ")}>
-              <label className="relative w-8 h-8 cursor-pointer">
+            {/* Color */}
+            <div className="flex items-center gap-2">
+              <label className={["relative w-7 h-7 cursor-pointer shrink-0 transition-opacity",
+                rainbow ? "opacity-30 pointer-events-none" : ""].join(" ")}>
                 <input type="color" value={penColor} onChange={(e) => setPenColor(e.target.value)}
                   className="absolute inset-0 opacity-0 cursor-pointer w-full h-full" />
                 <span className="absolute inset-0 rounded-full border-2 border-white/20" style={{ background: penColor }} />
               </label>
-              <span className="text-xs font-mono text-foreground/50">{penColor.toUpperCase()}</span>
-            </div>
-            <div className={["flex flex-wrap gap-1.5 transition-opacity", rainbow ? "opacity-40 pointer-events-none" : ""].join(" ")}>
-              {GEAR_PRESETS.map((gear) => (
-                <button key={gear.id} onClick={() => setPenColor(gear.color)} title={gear.name}
-                  className="w-5 h-5 rounded-full border transition-all hover:scale-110"
-                  style={{
-                    background: gear.color,
-                    borderColor: penColor === gear.color ? gear.color : "rgba(255,255,255,0.1)",
-                    boxShadow: penColor === gear.color ? `0 0 0 2px rgba(0,0,0,0.5),0 0 0 4px ${gear.color}` : undefined,
-                  }} />
-              ))}
-            </div>
-          </section>
-
-          <div className="h-px bg-border/50" />
-
-          {/* ── Nested Gear ───────────────────────────────────────── */}
-          <section className="flex flex-col gap-2">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Nested Gear</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-0.5">Gear inside the rolling gear.</p>
+              <div className={["flex flex-wrap gap-1 flex-1 transition-opacity",
+                rainbow ? "opacity-30 pointer-events-none" : ""].join(" ")}>
+                {GEAR_PRESETS.map((gear) => (
+                  <button key={gear.id} onClick={() => setPenColor(gear.color)} title={gear.name}
+                    className="w-4 h-4 rounded-full border transition-all hover:scale-110"
+                    style={{
+                      background: gear.color,
+                      borderColor: penColor === gear.color ? gear.color : "rgba(255,255,255,0.1)",
+                      boxShadow: penColor === gear.color ? `0 0 0 2px rgba(0,0,0,0.5),0 0 0 3px ${gear.color}` : undefined,
+                    }} />
+                ))}
               </div>
-              <button onClick={() => { setNestedEnabled((v) => !v); }}
-                disabled={isPlaying}
-                className={["relative inline-flex h-5 w-9 shrink-0 mt-0.5 items-center rounded-full transition-colors",
+              <button onClick={() => setRainbow((v) => !v)}
+                className={["shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold border transition-all",
+                  rainbow ? "border-transparent text-white" : "border-border text-muted-foreground hover:text-foreground"].join(" ")}
+                style={rainbow ? { background: "linear-gradient(90deg,#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa,#f472b6)" } : undefined}
+                title="Rainbow mode">
+                ~
+              </button>
+            </div>
+          </div>
+
+          <div className="border-t border-border/40" />
+
+          {/* ── Nested Gear ──────────────────────────────────── */}
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Nested Gear</p>
+              <button onClick={() => setNestedEnabled((v) => !v)} disabled={isPlaying}
+                className={["relative inline-flex h-4 w-8 shrink-0 items-center rounded-full transition-colors",
                   nestedEnabled ? "bg-amber-500" : "bg-secondary",
                   isPlaying ? "opacity-40 cursor-not-allowed" : ""].join(" ")}>
-                <span className={["inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform",
+                <span className={["inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform",
                   nestedEnabled ? "translate-x-4" : "translate-x-0.5"].join(" ")} />
               </button>
             </div>
             {nestedEnabled && (
-              <div className={["flex flex-col gap-2 pl-2 border-l-2 border-amber-500/30 transition-opacity",
+              <div className={["flex flex-col gap-1.5 pl-2 border-l-2 border-amber-500/30",
                 isPlaying ? "opacity-40 pointer-events-none" : ""].join(" ")}>
-                <ControlSlider label="Gear Size" value={nestedRatio} min={15} max={70} step={1}
-                  onChange={(v) => { setNestedRatio(v); }}
-                  onInput={(v) => { setNestedRatio(v); }}
+                <ControlSlider label="Size" value={nestedRatio} min={15} max={70} step={1}
+                  onChange={(v) => setNestedRatio(v)} onInput={(v) => setNestedRatio(v)}
                   display={(v) => `${Math.round(v)}%`} />
-                <p className="text-[10px] text-muted-foreground/50 -mt-1">% of rolling gear radius</p>
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-baseline justify-between">
-                    <p className="text-[10px] text-muted-foreground">Speed N</p>
-                    <span className="text-[10px] font-mono text-foreground/50">{nestedSpeed}×</span>
-                  </div>
-                  <div className="flex gap-1">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] text-muted-foreground shrink-0 w-10">Speed</span>
+                  <div className="flex gap-0.5 flex-1">
                     {[1,2,3,4,5,6,7,8].map((n) => (
                       <button key={n} onClick={() => setNestedSpeed(n)} disabled={isPlaying}
-                        className={["flex-1 h-6 rounded text-[10px] font-bold border transition-all",
-                          nestedSpeed === n
-                            ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                        className={["flex-1 h-5 rounded text-[9px] font-bold border transition-all",
+                          nestedSpeed === n ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
                             : "text-muted-foreground hover:text-foreground border-transparent hover:bg-secondary/50",
                         ].join(" ")}>
                         {n}
                       </button>
                     ))}
                   </div>
-                  <p className="text-[10px] text-muted-foreground/50">Rotations per carrier orbit</p>
                 </div>
-                <ControlSlider label="Pen Reach" value={nestedPenOffset} min={0.1} max={1} step={0.05}
-                  onChange={(v) => { setNestedPenOffset(v); }}
-                  onInput={(v) => { setNestedPenOffset(v); }}
+                <ControlSlider label="Reach" value={nestedPenOffset} min={0.1} max={1} step={0.05}
+                  onChange={(v) => setNestedPenOffset(v)} onInput={(v) => setNestedPenOffset(v)}
                   display={(v) => `${Math.round(v * 100)}%`} />
               </div>
             )}
-          </section>
+          </div>
 
-          <div className="h-px bg-border/50" />
-
-          {/* ── Composite mode ────────────────────────────────────── */}
-          <section>
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Composite Mode</p>
-                <p className="text-[10px] text-muted-foreground/60 mt-0.5">Layer multiple traces.</p>
-              </div>
+          {/* ── Composite + Clear ────────────────────────────── */}
+          <div className="flex items-center gap-2 mt-auto pt-1">
+            <div className="flex items-center gap-1.5 flex-1">
               <button onClick={() => setCompositeMode((v) => !v)}
-                className={["relative inline-flex h-5 w-9 shrink-0 mt-0.5 items-center rounded-full transition-colors",
+                className={["relative inline-flex h-4 w-8 shrink-0 items-center rounded-full transition-colors",
                   compositeMode ? "bg-primary" : "bg-secondary"].join(" ")}>
-                <span className={["inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform",
+                <span className={["inline-block h-3 w-3 transform rounded-full bg-white shadow transition-transform",
                   compositeMode ? "translate-x-4" : "translate-x-0.5"].join(" ")} />
               </button>
+              <span className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Composite</span>
             </div>
-          </section>
-
-          <section>
             <button onClick={clearAll} disabled={!hasTrace}
-              className="w-full px-3 py-2 rounded-md text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
-              Clear Canvas
+              className="px-2.5 py-1 rounded text-[10px] font-medium border border-border text-muted-foreground hover:text-foreground hover:border-foreground/25 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+              Clear
             </button>
-          </section>
+          </div>
 
           </>)}
 
-        </div>
-
-        <div className="px-4 py-3 border-t border-border">
-          <p className="text-[10px] text-muted-foreground/40">
-            {drawingEngine === "spirograph" ? "Arc-length integration · No-slip meshing" : "RK4 integrator · G = 1 natural units"}
-          </p>
         </div>
       </aside>
 
@@ -1907,7 +1805,7 @@ export default function SpirographPage() {
         }} />
 
         <div className="relative"
-          style={{ width: "min(calc(100vw - 256px - 32px), calc(100vh - 120px))", aspectRatio: "1 / 1" }}>
+          style={{ width: "min(calc(100vw - 240px - 32px), calc(100vh - 120px))", aspectRatio: "1 / 1" }}>
           <canvas ref={canvasRef} width={600} height={600} className="absolute inset-0 w-full h-full" />
         </div>
 
