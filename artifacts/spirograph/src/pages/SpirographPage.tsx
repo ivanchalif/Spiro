@@ -1653,10 +1653,9 @@ export default function SpirographPage() {
               </div>
               <GearShapeSection
                 label="" shape={movingShape} ecc={movingEcc} sides={movingSides} disabled={isPlaying}
-                hasCustomShape={hasCustomMoving} showDraw={meshMode === "rack"}
+                hasCustomShape={hasCustomMoving}
                 onShapeChange={handleMovingShape} onEccChange={handleMovingEcc} onEccInput={handleMovingEcc}
                 onSidesChange={handleMovingSides} onSidesInput={handleMovingSides}
-                onDrawCustom={() => setDrawShapeFor("moving")}
               />
             </div>
           </div>
