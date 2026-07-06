@@ -1326,6 +1326,9 @@ export default function SpirographPage() {
     setGearIdx(loopGearIdx);
     setGearRatio(loopGearRatio);
     setMeshMode("external");
+    // Presets always reset rack angle to 0
+    simRef.current.rackAngle = 0;
+    setRackAngle(0);
 
     const gear = makeEffectiveGear(loopGearIdx, loopGearRatio);
     rebuildTables(fShape, fEcc, fSides, mShape, mEcc, mSides, gear, "external");
@@ -1367,6 +1370,9 @@ export default function SpirographPage() {
     setMovingEcc(rMEcc);
     setMovingSides(rMSides);
     setPenOffset(rPenOff);
+    // Presets always reset rack angle to 0
+    simRef.current.rackAngle = 0;
+    setRackAngle(0);
 
     const gear = makeEffectiveGear(gearIdx, gearRatio);
     rebuildTables(rFShape, rFEcc, rFSides, rMShape, rMEcc, rMSides, gear, meshMode);
