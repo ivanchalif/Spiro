@@ -145,35 +145,52 @@ export function computeMeshState(
   meshMode: MeshMode = "internal",
   customFixedRTable?: Float64Array | null,
   customMovingRTable?: Float64Array | null,
+  rackPathTable?: Float64Array | null,   // curved rack path (from buildRackPathTable)
 ): GearMeshState {
   // ── Rack mode ────────────────────────────────────────────────────────────
   if (meshMode === "rack") {
-    const arcLen = movingBaseR * phi;
-    const psi    = angleForArcLength(movingTable, arcLen);
-    const cx = arcLen;
+    const arcLen     = movingBaseR * phi;
+    const psiRolling = angleForArcLength(movingTable, arcLen);
+    const RACK_TOTAL = movingBaseR * 4 * Math.PI; // RACK_CYCLES=2 → 4π
 
-    // Custom rack y-profile: values -1..1, scaled by movingBaseR * 0.5.
-    // RACK_MAX_PHI = RACK_CYCLES(2) * TWO_PI = 4π — full rack span.
-    let rackYOff = 0;
-    if (customFixedRTable && customFixedRTable.length > 0) {
-      const N = customFixedRTable.length;
-      const RACK_MAX_PHI = 4 * Math.PI;
-      const t   = ((phi % RACK_MAX_PHI) + RACK_MAX_PHI) % RACK_MAX_PHI / RACK_MAX_PHI;
-      const idx = t * N;
-      const lo  = Math.floor(idx) % N;
-      const hi  = (lo + 1) % N;
-      const frac = idx - Math.floor(idx);
-      rackYOff = (customFixedRTable[lo] * (1 - frac) + customFixedRTable[hi] * frac) * movingBaseR * 0.5;
+    let cx: number, cy: number, psi: number;
+
+    if (rackPathTable && rackPathTable.length >= 6) {
+      // ── Curved rack path ─────────────────────────────────────────────
+      // The gear rolls tangentially along the intrinsic curve.
+      // Gear centre is offset perpendicular to the path tangent by movingBaseR.
+      // psi bakes in the path tangent angle so the caller's rotation formula
+      //   (psi + globalRackAngle) remains correct.
+      const { x: px, y: py, alpha } = evalRackPath(rackPathTable, arcLen, RACK_TOTAL);
+      // Normal pointing "above" the rack (toward gear centre):
+      // rotate (0, -1) by alpha → (sin α, -cos α)
+      cx  = px + movingBaseR * Math.sin(alpha);
+      cy  = py - movingBaseR * Math.cos(alpha);
+      psi = psiRolling + alpha;           // rolling + path curvature
+    } else {
+      // ── Straight rack (default / custom y-profile) ───────────────────
+      let rackYOff = 0;
+      if (customFixedRTable && customFixedRTable.length > 0) {
+        const N = customFixedRTable.length;
+        const RACK_MAX_PHI = 4 * Math.PI;
+        const t   = ((phi % RACK_MAX_PHI) + RACK_MAX_PHI) % RACK_MAX_PHI / RACK_MAX_PHI;
+        const idx = t * N;
+        const lo  = Math.floor(idx) % N;
+        const hi  = (lo + 1) % N;
+        const frac = idx - Math.floor(idx);
+        rackYOff = (customFixedRTable[lo] * (1 - frac) + customFixedRTable[hi] * frac) * movingBaseR * 0.5;
+      }
+      cx  = arcLen;
+      cy  = rackYOff - movingBaseR;
+      psi = psiRolling;
     }
 
-    const cy = rackYOff - movingBaseR;
-    const penAngleWorld = psi;
-    const d  = penOffset * movingBaseR;
+    const d = penOffset * movingBaseR;
     return {
       phi, psi, arcLenFixed: arcLen,
       movingCenterX: cx, movingCenterY: cy,
-      penX: cx + d * Math.cos(penAngleWorld),
-      penY: cy + d * Math.sin(penAngleWorld),
+      penX: cx + d * Math.cos(psi),
+      penY: cy + d * Math.sin(psi),
     };
   }
 
@@ -209,6 +226,102 @@ export function computeMeshState(
     movingCenterX: cx, movingCenterY: cy,
     penX: cx + d * Math.cos(penAngleWorld),
     penY: cy + d * Math.sin(penAngleWorld),
+  };
+}
+
+// ── Rack curve types ─────────────────────────────────────────────────────────
+export type RackCurveType = "straight" | "arc" | "wave" | "spiral";
+
+/**
+ * buildRackPathTable
+ *
+ * Builds a lookup table for a curved rack path using the intrinsic-curve
+ * representation (tangent angle as a function of arc length).
+ *
+ * Returns a Float64Array packed as [x0,y0,α0, x1,y1,α1, …] for N+1 samples
+ * covering arc lengths 0..totalLen.  At arc length s the gear's contact point
+ * is at (x(s), y(s)) and the path tangent angle is α(s).
+ *
+ * Gear-centre offset and pen position are computed in computeMeshState using
+ * the normal direction derived from α.
+ */
+export function buildRackPathTable(
+  curveType: RackCurveType,
+  bend: number,     // 0..1, curvature intensity
+  totalLen: number, // total arc length of the rack (= movingBaseR * RACK_MAX_PHI)
+  N = 600,
+): Float64Array {
+  const out = new Float64Array((N + 1) * 3);
+  // straight or zero bend → degenerate: x=s, y=0, α=0
+  if (curveType === "straight" || bend <= 0 || totalLen <= 0) {
+    for (let i = 0; i <= N; i++) {
+      out[i * 3]     = (i / N) * totalLen;
+      out[i * 3 + 1] = 0;
+      out[i * 3 + 2] = 0;
+    }
+    return out;
+  }
+
+  // tangent angle α(s) for each curve type
+  const getAlpha = (s: number): number => {
+    switch (curveType) {
+      case "arc": {
+        // Constant curvature → circular arc.
+        // Total angle = bend * π  (full 180° at bend=1).
+        return (bend * Math.PI / totalLen) * s;
+      }
+      case "wave": {
+        // Sinusoidal tangent angle → gear rolls on a sine-wave path.
+        // Two full oscillations; max tangent ≈ ±72° at bend=1.
+        return (bend * Math.PI / 2.5) * Math.sin((TWO_PI * 2 * s) / totalLen);
+      }
+      case "spiral": {
+        // Euler / clothoid: curvature grows linearly → α(s) ∝ s².
+        // Produces a spiral-like expanding curve.
+        return (bend * TWO_PI / (2 * totalLen)) * s * s / totalLen;
+      }
+      default: return 0;
+    }
+  };
+
+  // Numerically integrate path position via Simpson's rule.
+  let x = 0, y = 0;
+  out[0] = 0; out[1] = 0; out[2] = 0;
+  const ds = totalLen / N;
+  for (let i = 1; i <= N; i++) {
+    const s0 = (i - 1) * ds;
+    const s1 = i * ds;
+    const sm = (s0 + s1) * 0.5;
+    const a0 = getAlpha(s0), am = getAlpha(sm), a1 = getAlpha(s1);
+    x += (ds / 6) * (Math.cos(a0) + 4 * Math.cos(am) + Math.cos(a1));
+    y += (ds / 6) * (Math.sin(a0) + 4 * Math.sin(am) + Math.sin(a1));
+    out[i * 3]     = x;
+    out[i * 3 + 1] = y;
+    out[i * 3 + 2] = a1;
+  }
+  return out;
+}
+
+/**
+ * evalRackPath — interpolate path position and tangent at arc length s.
+ * totalLen must match the value used in buildRackPathTable.
+ */
+export function evalRackPath(
+  table: Float64Array,
+  s: number,
+  totalLen: number,
+): { x: number; y: number; alpha: number } {
+  const N = (table.length / 3) - 1;
+  if (N <= 0 || totalLen <= 0) return { x: s, y: 0, alpha: 0 };
+  const sc   = Math.max(0, Math.min(s, totalLen));
+  const t    = (sc / totalLen) * N;
+  const lo   = Math.min(Math.floor(t), N - 1);
+  const hi   = lo + 1;
+  const frac = t - lo;
+  return {
+    x:     table[lo * 3]     * (1 - frac) + table[hi * 3]     * frac,
+    y:     table[lo * 3 + 1] * (1 - frac) + table[hi * 3 + 1] * frac,
+    alpha: table[lo * 3 + 2] * (1 - frac) + table[hi * 3 + 2] * frac,
   };
 }
 
