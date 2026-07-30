@@ -146,6 +146,7 @@ export function computeMeshState(
   customFixedRTable?: Float64Array | null,
   customMovingRTable?: Float64Array | null,
   rackPathTable?: Float64Array | null,   // curved rack path (from buildRackPathTable)
+  rackFlipSide?: boolean,               // true → gear on underside of curved path (bottom pass)
 ): GearMeshState {
   // ── Rack mode ────────────────────────────────────────────────────────────
   if (meshMode === "rack") {
@@ -164,9 +165,11 @@ export function computeMeshState(
       const { x: px, y: py, alpha } = evalRackPath(rackPathTable, arcLen, RACK_TOTAL);
       // Normal pointing "above" the rack (toward gear centre):
       // rotate (0, -1) by alpha → (sin α, -cos α)
-      cx  = px + movingBaseR * Math.sin(alpha);
-      cy  = py - movingBaseR * Math.cos(alpha);
-      psi = psiRolling + alpha;           // rolling + path curvature
+      // For bottom pass (rackFlipSide) the gear is on the opposite side.
+      const side = rackFlipSide ? -1 : 1;
+      cx  = px + side * movingBaseR * Math.sin(alpha);
+      cy  = py - side * movingBaseR * Math.cos(alpha);
+      psi = psiRolling + alpha + (rackFlipSide ? Math.PI : 0);
     } else {
       // ── Straight rack (default / custom y-profile) ───────────────────
       let rackYOff = 0;

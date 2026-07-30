@@ -1084,11 +1084,11 @@ export default function SpirographPage() {
     const ratio = totalArcLength(ft) / totalArcLength(mt);
     const baseLoops = closureLoops(ratio);
 
-    // Curved racks have no bottom-pass return; straight rack does two passes.
+    // Both straight and curved racks use a 2-pass cycle (out + back).
     const rackPath  = rackPathTableRef.current;
     const isCurvedRack = mode === "rack" && rackPath !== null;
     const totalPhi = mode === "rack"
-      ? (isCurvedRack ? RACK_MAX_PHI : 2 * RACK_MAX_PHI)
+      ? 2 * RACK_MAX_PHI
       : TWO_PI * (nestedOn ? baseLoops * nestedN : baseLoops);
     const numSteps = nestedOn ? Math.min(2000, 800 * nestedN) : Math.min(2000, baseLoops * 60);
 
@@ -1127,29 +1127,40 @@ export default function SpirographPage() {
       ctx.beginPath();
       for (let i = 0; i <= numSteps; i++) {
         const ph = (i / numSteps) * totalPhi;
-        // Curved racks: no bottom pass; straight: detect if past RACK_MAX_PHI
-        const rackBot = mode === "rack" && !isCurvedRack && ph > RACK_MAX_PHI;
-        const lph = rackBot ? ph - RACK_MAX_PHI : ph;
+        const rackBot      = mode === "rack" && ph > RACK_MAX_PHI;
+        const meshPh       = rackBot ? ph - RACK_MAX_PHI : ph;
+        const lph          = (rackBot && isCurvedRack) ? RACK_MAX_PHI - meshPh : meshPh;
+        const flipSide     = rackBot && isCurvedRack;
         const st = computeMeshState(
           lph, fShape, FIXED_BASE_R, fEcc, ft, fSides,
           mShape, gear.radius, mEcc, mt, mSides, ringOff, mode,
-          customFixedRRef.current, customMovingRRef.current, rackPath,
+          customFixedRRef.current, customMovingRRef.current, rackPath, flipSide,
         );
+        // Effective pen/center: straight rack mirrors position; curved rack handled in computeMeshState
+        let penXw0: number, penYw0: number;
+        let mcxW0: number, mcyW0: number;
+        if (rackBot && !isCurvedRack) {
+          mcxW0  = rackMaxCXIdle - st.movingCenterX;
+          mcyW0  = -st.movingCenterY;
+          penXw0 = rackMaxCXIdle - st.penX;
+          penYw0 = -st.penY;
+        } else {
+          mcxW0  = st.movingCenterX;
+          mcyW0  = st.movingCenterY;
+          penXw0 = st.penX;
+          penYw0 = st.penY;
+        }
         let px: number, py: number;
         if (nestedOn) {
-          const mcxW0 = rackBot ? rackMaxCXIdle - st.movingCenterX : st.movingCenterX;
-          const mcyW0 = rackBot ? -st.movingCenterY : st.movingCenterY;
           const ns = computeNestedGear(lph, st.psi, mcxW0, mcyW0,
             gear.radius, nestedR2, nestedN, nestedD);
-          const nPenX0 = rackBot ? rackMaxCXIdle - ns.penX : ns.penX;
-          const nPenY0 = rackBot ? -ns.penY : ns.penY;
+          const nPenX0 = (rackBot && !isCurvedRack) ? rackMaxCXIdle - ns.penX : ns.penX;
+          const nPenY0 = (rackBot && !isCurvedRack) ? -ns.penY : ns.penY;
           const nPenX = mode === "rack" ? nPenX0 * ghostCosA - nPenY0 * ghostSinA : nPenX0;
           const nPenY = mode === "rack" ? nPenX0 * ghostSinA + nPenY0 * ghostCosA : nPenY0;
           px = cx + (nPenX - offX) * scale;
           py = cy + (nPenY - offY) * scale;
         } else {
-          const penXw0 = rackBot ? rackMaxCXIdle - st.penX : st.penX;
-          const penYw0 = rackBot ? -st.penY : st.penY;
           const penXw = mode === "rack" ? penXw0 * ghostCosA - penYw0 * ghostSinA : penXw0;
           const penYw = mode === "rack" ? penXw0 * ghostSinA + penYw0 * ghostCosA : penYw0;
           px = cx + (penXw - offX) * scale;
@@ -1207,7 +1218,7 @@ export default function SpirographPage() {
     const ratio  = totalArcLength(sim.fixedTable) / totalArcLength(sim.movingTable);
     const baseLoops = closureLoops(ratio);
     const maxPhi = capMode === "rack"
-      ? (capIsCurvedRack ? RACK_MAX_PHI : 2 * RACK_MAX_PHI)
+      ? 2 * RACK_MAX_PHI   // both straight and curved use the 2-pass cycle
       : TWO_PI * (capNested ? baseLoops * capNN : baseLoops);
 
     let frameCount = 0;
@@ -1215,33 +1226,48 @@ export default function SpirographPage() {
       const canvasSize = getCanvasSize();
       const scale = computeScale(capMode, capGear, canvasSize, capMode === "rack" ? sim.rackBounds : undefined);
 
-      // Curved racks have no bottom pass; straight rack may have one (phi > RACK_MAX_PHI)
-      const rackBottom = capMode === "rack" && !capIsCurvedRack && sim.phi > RACK_MAX_PHI;
+      // Bottom pass: phi > RACK_MAX_PHI (applies to both straight and curved racks)
+      const rackBottom = capMode === "rack" && sim.phi > RACK_MAX_PHI;
       const meshPhi    = rackBottom ? sim.phi - RACK_MAX_PHI : sim.phi;
       const rackMaxCX  = capGear.radius * RACK_MAX_PHI;
 
+      // Curved bottom pass: travel backward along path, flip gear to underside.
+      // Straight bottom pass: same meshPhi, mirror handled after computeMeshState.
+      const lph          = (rackBottom && capIsCurvedRack) ? RACK_MAX_PHI - meshPhi : meshPhi;
+      const rackFlipSide = rackBottom && capIsCurvedRack;
+
       const state = computeMeshState(
-        meshPhi,
+        lph,
         capFShape, FIXED_BASE_R, capFEcc, sim.fixedTable, capFSides,
         capMShape, capGear.radius, capMEcc, sim.movingTable, capMSides,
         capPen, capMode,
-        capCustomFixedR, capCustomMovingR, capRackPath,
+        capCustomFixedR, capCustomMovingR, capRackPath, rackFlipSide,
       );
 
-      // Effective positions: mirror X and flip Y for bottom pass (unrotated rack frame)
-      const effMcx0  = rackBottom ? rackMaxCX - state.movingCenterX : state.movingCenterX;
-      const effMcy0  = rackBottom ? -state.movingCenterY            : state.movingCenterY;
-      const effPenX0 = rackBottom ? rackMaxCX - state.penX          : state.penX;
-      const effPenY0 = rackBottom ? -state.penY                     : state.penY;
-      // Apply rack rotation (after mirroring, so bottom-pass symmetry is correct)
+      // Effective positions
+      let effMcx0: number, effMcy0: number, effPenX0: number, effPenY0: number;
+      if (rackBottom && !capIsCurvedRack) {
+        // Straight rack: mirror X position and flip Y (gear on underside, traveling back)
+        effMcx0  = rackMaxCX - state.movingCenterX;
+        effMcy0  = -state.movingCenterY;
+        effPenX0 = rackMaxCX - state.penX;
+        effPenY0 = -state.penY;
+      } else {
+        // Curved rack (computeMeshState handles side flip) or forward pass
+        effMcx0  = state.movingCenterX;
+        effMcy0  = state.movingCenterY;
+        effPenX0 = state.penX;
+        effPenY0 = state.penY;
+      }
+      // Apply rack rotation (after mirroring)
       const capRackAngle = sim.rackAngle;
       const capCosA = Math.cos(capRackAngle), capSinA = Math.sin(capRackAngle);
       const effMcx  = capMode === "rack" ? effMcx0 * capCosA - effMcy0 * capSinA : effMcx0;
       const effMcy  = capMode === "rack" ? effMcx0 * capSinA + effMcy0 * capCosA : effMcy0;
       const effPenX = capMode === "rack" ? effPenX0 * capCosA - effPenY0 * capSinA : effPenX0;
       const effPenY = capMode === "rack" ? effPenX0 * capSinA + effPenY0 * capCosA : effPenY0;
-      // For rack bottom pass the gear is inverted → add π to rotation
-      const effPsi  = rackBottom ? state.psi + Math.PI             : state.psi;
+      // Straight rack bottom pass: gear is inverted → add π. Curved: already in psi.
+      const effPsi  = (rackBottom && !capIsCurvedRack) ? state.psi + Math.PI : state.psi;
 
       let frameColor = capColor;
       if (capRainbow) {
