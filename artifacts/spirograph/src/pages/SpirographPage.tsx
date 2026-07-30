@@ -1308,12 +1308,12 @@ export default function SpirographPage() {
       frameCount++;
 
       if (sim.phi >= maxPhi) {
-        if (capComposite) {
-          sim.phi = 0;
+        if (capComposite || capMode === "rack") {
+          sim.phi -= maxPhi; // wrap — keeps fractional overshoot for smooth looping
           const newRun: TraceRun = { points: [], color: frameColor, weight: capWeight };
           traceRunsRef.current.push(newRun);
           currentRunRef.current = newRun;
-          // Also cycle extra runs in composite mode
+          // Also cycle extra runs
           for (let ri = 0; ri < capRings - 1; ri++) {
             const ringColor = MULTI_RING_COLORS[ri % MULTI_RING_COLORS.length];
             const extraRun: TraceRun = { points: [], color: ringColor, weight: capWeight };
