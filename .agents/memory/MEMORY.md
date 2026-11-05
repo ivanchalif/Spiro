@@ -1,2 +1,2 @@
 - [Curved rack physics](curved-rack-physics.md) — intrinsic-curve rep avoids approximations; gear center offset computed from path tangent; psi already bakes in alpha so callers unchanged.
-- [Curved rack UI wiring](curved-rack-ui.md) — rackCurveType/rackBend state mirrored into refs so zero-dep rebuildTables always sees latest; curved racks skip the bottom-pass.
+- [Curved rack UI wiring](curved-rack-ui.md) — state/ref synchronization constraints for rack controls.

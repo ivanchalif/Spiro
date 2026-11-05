@@ -12,4 +12,8 @@ Use intrinsic-curve representation: define each path by tangent angle α(s) as a
 - `buildRackPathTable(curveType, bend, totalLen, N)` returns a packed `Float64Array [x, y, α …]` for N+1 arc-length samples (Simpson integration).
 - `evalRackPath(table, s, totalLen)` interpolates `{x, y, alpha}` at any arc length.
 - `computeMeshState` last optional param: `rackPathTable?: Float64Array | null`. When provided, it uses `evalRackPath` instead of the straight-line formula.
-- For curved racks **skip the bottom pass**: `maxPhi = RACK_MAX_PHI` (not `2 × RACK_MAX_PHI`). The return-pass mirror logic only makes sense for a straight horizontal rack.
+- The gear should loop around the end and continue on the reverse side of the rack, continuously, including curved racks. Restarting at the beginning or jumping directly between sides does not satisfy this requirement.
+
+**Why:** The user explicitly corrected the interpretation of “wrap around”: they mean traveling around the endpoint, not resetting the animation.
+
+**How to apply:** Evaluate endpoint transitions as part of the complete route, and check continuity of both gear position and pen trace across each turnaround.
