@@ -226,3 +226,28 @@
     filter: drop-shadow(0 0 8px currentColor);
   }
 }
+
+/* Readable control labels and usable hit areas without changing the drawing theme. */
+.simulation-controls :is(button, label, span, p) {
+  font-size: 0.75rem;
+}
+.simulation-controls button {
+  min-height: 2.5rem;
+}
+.simulation-controls button[role="switch"] {
+  min-height: 1.5rem;
+}
+button:focus-visible, input:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 3px;
+}
+input[type="range"]:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+}
+@media (pointer: coarse) {
+  input[type="range"]::-webkit-slider-thumb { width: 22px; height: 22px; }
+  input[type="range"]::-moz-range-thumb { width: 22px; height: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}

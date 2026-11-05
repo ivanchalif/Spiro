@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 const TWO_PI = 2 * Math.PI;
 const N_BINS = 256;
@@ -122,8 +123,11 @@ export function DrawShapeModal({ target, isRack, onDone, onCancel }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const strokesRef   = useRef<{ x: number; y: number }[][]>([]);
   const currentRef   = useRef<{ x: number; y: number }[]>([]);
-  const [drawing,   setDrawing]   = useState(false);
-  const [hasPoints, setHasPoints] = useState(false);
+  const drawingRef   = useRef(false);
+  const [pointCount, setPointCount] = useState(0);
+  const [error, setError] = useState<string | null>(null);
+  const hasPoints = pointCount > 0;
+  const canApply  = pointCount >= 6;
 
   const CW = isRack ? RACK_W  : POLAR_S;
   const CH = isRack ? RACK_H  : POLAR_S;
@@ -253,41 +257,40 @@ export function DrawShapeModal({ target, isRack, onDone, onCancel }: Props) {
 
   useEffect(() => { redraw(); }, [redraw]);
 
-  const getPos = (e: React.MouseEvent | React.TouchEvent): { x: number; y: number } | null => {
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-    const rect   = canvas.getBoundingClientRect();
-    const scaleX = CW / rect.width;
-    const scaleY = CH / rect.height;
-    if ("touches" in e) {
-      if (e.touches.length === 0) return null;
-      return { x: (e.touches[0].clientX - rect.left) * scaleX, y: (e.touches[0].clientY - rect.top) * scaleY };
-    }
-    return { x: ((e as React.MouseEvent).clientX - rect.left) * scaleX, y: ((e as React.MouseEvent).clientY - rect.top) * scaleY };
+  const getPos = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    const x = (e.clientX - rect.left) * (CW / rect.width);
+    const y = (e.clientY - rect.top) * (CH / rect.height);
+    return Number.isFinite(x) && Number.isFinite(y) ? { x, y } : null;
   };
 
-  const onDown = (e: React.MouseEvent | React.TouchEvent) => {
+  const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     e.preventDefault();
     const pos = getPos(e);
     if (!pos) return;
-    setDrawing(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drawingRef.current = true;
     currentRef.current = [pos];
+    setError(null);
     redraw();
   };
-  const onMove = (e: React.MouseEvent | React.TouchEvent) => {
+  const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
     e.preventDefault();
-    if (!drawing) return;
     const pos = getPos(e);
     if (!pos) return;
     currentRef.current.push(pos);
     redraw();
   };
-  const onUp = () => {
-    if (!drawing) return;
-    setDrawing(false);
-    if (currentRef.current.length > 3) {
+  const finish = (e: React.PointerEvent<HTMLCanvasElement>, keep: boolean) => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    if (keep && currentRef.current.length >= 2) {
       strokesRef.current.push([...currentRef.current]);
-      setHasPoints(true);
+      setPointCount(strokesRef.current.reduce((n, s) => n + s.length, 0));
     }
     currentRef.current = [];
     redraw();
@@ -295,73 +298,81 @@ export function DrawShapeModal({ target, isRack, onDone, onCancel }: Props) {
   const handleClear = () => {
     strokesRef.current = [];
     currentRef.current = [];
-    setHasPoints(false);
+    drawingRef.current = false;
+    setPointCount(0);
+    setError(null);
     redraw();
   };
   const handleApply = () => {
     const allPts = strokesRef.current.flat();
     if (allPts.length < 6) return;
-    onDone(isRack ? processRackPoints(allPts) : processPolarPoints(allPts));
+    const table = isRack ? processRackPoints(allPts) : processPolarPoints(allPts);
+    if (table.length !== N_BINS || !table.every(Number.isFinite)) {
+      setError("The drawn shape could not be processed. Clear and try again.");
+      return;
+    }
+    onDone(table);
   };
 
+  const title = isRack ? "Draw rack profile" : `Draw custom ${target === "fixed" ? "outer ring" : "inner gear"} shape`;
+
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 backdrop-blur-sm"
-      onMouseUp={onUp}
-    >
-      <div
-        className="bg-card border border-border rounded-2xl shadow-2xl flex flex-col gap-4 p-5"
-        style={{ maxWidth: "min(460px, 96vw)" }}
+    <Dialog open onOpenChange={(o) => { if (!o) onCancel(); }}>
+      <DialogContent
+        className="bg-card border-border rounded-2xl shadow-2xl flex flex-col gap-4 p-5 w-[min(460px,96vw)] max-w-none max-h-[96dvh] overflow-y-auto"
+        data-testid="modal-draw-shape"
       >
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h2 className="text-sm font-semibold leading-tight">
-              {isRack ? "Draw rack profile" : `Draw custom ${target === "fixed" ? "outer ring" : "inner gear"} shape`}
-            </h2>
-            <p className="text-[10px] text-muted-foreground mt-1 leading-snug">
-              {isRack
-                ? "Draw a curve to set the rack surface height. The gear rolls along it."
-                : "Draw freely inside the dashed circle. The green preview shows the polar profile."}
-            </p>
-          </div>
-          <button
-            onClick={onCancel}
-            className="shrink-0 w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground transition-colors"
-          >✕</button>
+        <div className="pr-8">
+          <DialogTitle className="text-sm font-semibold leading-tight">{title}</DialogTitle>
+          <DialogDescription className="text-[11px] text-muted-foreground mt-1 leading-snug">
+            {isRack
+              ? "Draw a curve to set the rack surface height. The gear rolls along it."
+              : "Draw freely inside the dashed circle. The green preview shows the polar profile."}
+          </DialogDescription>
         </div>
 
         <canvas
           ref={canvasRef}
           width={CW}
           height={CH}
+          role="img"
+          aria-label={`${title} drawing area`}
+          data-testid="canvas-draw-shape"
           className="w-full rounded-xl cursor-crosshair touch-none select-none"
           style={{ aspectRatio: `${CW} / ${CH}` }}
-          onMouseDown={onDown}
-          onMouseMove={onMove}
-          onMouseUp={onUp}
-          onMouseLeave={onUp}
-          onTouchStart={onDown}
-          onTouchMove={onMove}
-          onTouchEnd={onUp}
+          onPointerDown={onDown}
+          onPointerMove={onMove}
+          onPointerUp={(e) => finish(e, true)}
+          onPointerCancel={(e) => finish(e, false)}
+          onLostPointerCapture={(e) => finish(e, true)}
         />
+
+        <p className="text-[11px] text-muted-foreground font-mono" aria-live="polite" data-testid="text-point-count">
+          {error ?? (canApply ? `${pointCount} points captured` : `${pointCount} / 6 points needed`)}
+        </p>
 
         <div className="flex gap-2">
           <button
+            type="button"
             onClick={handleClear}
-            className="flex-1 py-2 rounded-lg text-[11px] font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all"
+            disabled={!hasPoints}
+            data-testid="button-clear-shape"
+            className="flex-1 py-2.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all disabled:opacity-30 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-ring"
           >Clear</button>
           <button
+            type="button"
             onClick={handleApply}
-            disabled={!hasPoints}
+            disabled={!canApply}
+            data-testid="button-apply-shape"
             className={[
-              "flex-1 py-2 rounded-lg text-[11px] font-semibold border transition-all",
-              hasPoints
+              "flex-1 py-2.5 rounded-lg text-xs font-semibold border transition-all focus-visible:outline-2 focus-visible:outline-ring",
+              canApply
                 ? "border-primary/40 text-primary hover:bg-primary/10 active:scale-95"
                 : "opacity-30 cursor-not-allowed border-border text-muted-foreground",
             ].join(" ")}
           >Apply Shape</button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,3 +1,5 @@
+import { evaluateRackRoute } from "./rackRoute";
+
 export type GearShape = "circle" | "ellipse" | "polygon" | "custom";
 export type MeshMode  = "internal" | "external" | "rack";
 
@@ -146,47 +148,17 @@ export function computeMeshState(
   customFixedRTable?: Float64Array | null,
   customMovingRTable?: Float64Array | null,
   rackPathTable?: Float64Array | null,   // curved rack path (from buildRackPathTable)
-  rackFlipSide?: boolean,               // true → gear on underside of curved path (bottom pass)
 ): GearMeshState {
   // ── Rack mode ────────────────────────────────────────────────────────────
   if (meshMode === "rack") {
-    const arcLen     = movingBaseR * phi;
-    const psiRolling = angleForArcLength(movingTable, arcLen);
-    const RACK_TOTAL = movingBaseR * 4 * Math.PI; // RACK_CYCLES=2 → 4π
-
-    let cx: number, cy: number, psi: number;
-
-    if (rackPathTable && rackPathTable.length >= 6) {
-      // ── Curved rack path ─────────────────────────────────────────────
-      // The gear rolls tangentially along the intrinsic curve.
-      // Gear centre is offset perpendicular to the path tangent by movingBaseR.
-      // psi bakes in the path tangent angle so the caller's rotation formula
-      //   (psi + globalRackAngle) remains correct.
-      const { x: px, y: py, alpha } = evalRackPath(rackPathTable, arcLen, RACK_TOTAL);
-      // Normal pointing "above" the rack (toward gear centre):
-      // rotate (0, -1) by alpha → (sin α, -cos α)
-      // For bottom pass (rackFlipSide) the gear is on the opposite side.
-      const side = rackFlipSide ? -1 : 1;
-      cx  = px + side * movingBaseR * Math.sin(alpha);
-      cy  = py - side * movingBaseR * Math.cos(alpha);
-      psi = psiRolling + alpha + (rackFlipSide ? Math.PI : 0);
-    } else {
-      // ── Straight rack (default / custom y-profile) ───────────────────
-      let rackYOff = 0;
-      if (customFixedRTable && customFixedRTable.length > 0) {
-        const N = customFixedRTable.length;
-        const RACK_MAX_PHI = 4 * Math.PI;
-        const t   = ((phi % RACK_MAX_PHI) + RACK_MAX_PHI) % RACK_MAX_PHI / RACK_MAX_PHI;
-        const idx = t * N;
-        const lo  = Math.floor(idx) % N;
-        const hi  = (lo + 1) % N;
-        const frac = idx - Math.floor(idx);
-        rackYOff = (customFixedRTable[lo] * (1 - frac) + customFixedRTable[hi] * frac) * movingBaseR * 0.5;
-      }
-      cx  = arcLen;
-      cy  = rackYOff - movingBaseR;
-      psi = psiRolling;
-    }
+    const route = evaluateRackRoute(phi, movingBaseR, rackPathTable, customFixedRTable);
+    const arcLen = movingBaseR * phi;
+    const circumference = totalArcLength(movingTable);
+    // Keep complete rotations instead of a modulo angle so endpoint rotations are continuous.
+    const psiRolling = Math.floor(arcLen / circumference) * TWO_PI
+      + angleForArcLength(movingTable, arcLen);
+    const cx = route.centerX, cy = route.centerY;
+    const psi = psiRolling + route.heading;
 
     const d = penOffset * movingBaseR;
     return {
@@ -274,9 +246,9 @@ export function buildRackPathTable(
         return (bend * Math.PI / totalLen) * s;
       }
       case "wave": {
-        // Sinusoidal tangent angle → gear rolls on a sine-wave path.
-        // Two full oscillations; max tangent ≈ ±72° at bend=1.
-        return (bend * Math.PI / 2.5) * Math.sin((TWO_PI * 2 * s) / totalLen);
+        // Two oscillations, ±45° maximum. With L=4πR this keeps R|curvature|<1,
+        // so the reverse-side offset cannot fold into a cusp.
+        return (bend * Math.PI / 4) * Math.sin((TWO_PI * 2 * s) / totalLen);
       }
       case "spiral": {
         // Euler / clothoid: curvature grows linearly → α(s) ∝ s².

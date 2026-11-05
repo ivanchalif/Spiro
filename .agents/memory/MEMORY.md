@@ -1,2 +1,2 @@
-- [Curved rack physics](curved-rack-physics.md) — intrinsic-curve rep avoids approximations; gear center offset computed from path tangent; psi already bakes in alpha so callers unchanged.
-- [Curved rack UI wiring](curved-rack-ui.md) — state/ref synchronization constraints for rack controls.
+- [Curved rack physics](curved-rack-physics.md) — the user requires continuous travel around both endpoints, not a reset or a jump between rack sides.
+- [Long-session history](long-session-history.md) — preserve visible artwork by flattening older vectors; recent-stroke undo is intentionally limited.
