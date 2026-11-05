@@ -4,14 +4,13 @@ import {
   buildRackPathTable,
   computeMeshState,
   evalRackPath,
-  gearRadius,
   totalArcLength,
   type GearShape,
   type MeshMode,
   type RackCurveType,
 } from "@/lib/gearMath";
 import { DrawShapeModal } from "@/components/DrawShapeModal";
-import { RACK_PERIOD, RACK_SPAN, evaluateRackRoute, rackContact } from "@/lib/rackRoute";
+import { RACK_PERIOD, RACK_SPAN, rackOutline } from "@/lib/rackRoute";
 import { evaluateMesh, gearOrientation, computeNestedGear as nestedGear, FixedStepClock, PointRing, type MeshConfig, type NestedState } from "@/lib/simulation";
 import { TraceLayer, type TraceRun } from "@/lib/traceLayer";
 import { ControlSlider } from "@/components/ControlSlider";
@@ -25,7 +24,6 @@ const TWO_PI = 2 * Math.PI;
 const TABLE_N = 800;
 const FIXED_BASE_R = 155;
 const FIXED_TEETH  = 124;
-const TOOTH_SAMPLES = 18;
 const PEN_HOLES = [0.18, 0.32, 0.46, 0.60, 0.74, 0.88];
 // Colors assigned to rings 2–5 (ring 1 always uses the user's ink color)
 const MULTI_RING_COLORS = ["#f472b6", "#34d399", "#fbbf24", "#a78bfa"];
@@ -316,6 +314,7 @@ export default function SpirographPage() {
   const [gearIdx,     setGearIdx]     = useState(DEFAULT_GEAR_IDX);
   // Moving gear radius as % of FIXED_BASE_R (20–80). Default ≈ 55 matches Standard preset R85.
   const [gearRatio,   setGearRatio]   = useState(55);
+  const [fitScale, setFitScale] = useState(1);
   const [meshMode,    setMeshMode]    = useState<MeshMode>("internal");
   const [fixedShape,  setFixedShape]  = useState<GearShape>("circle");
   const [fixedEcc,    setFixedEcc]    = useState(0.3);
@@ -474,7 +473,7 @@ export default function SpirographPage() {
     return {
       fixedShape: s.fixedShape, fixedRadius: FIXED_BASE_R, fixedEcc: s.fixedEcc, fixedSides: s.fixedSides,
       movingShape: s.movingShape, movingRadius: s.gear.radius, movingEcc: s.movingEcc, movingSides: s.movingSides,
-      fixedTable: s.fixedTable, movingTable: s.movingTable, mode: s.meshMode, rackAngle: s.rackAngle,
+      fixedTable: s.fixedTable, movingTable: s.movingTable, mode: s.meshMode, rackAngle: s.rackAngle, movingTeeth: s.gear.teeth,
       customFixed: customFixedRRef.current, customMoving: customMovingRRef.current, rackPath: rackPathTableRef.current,
     };
   }, []);
@@ -518,14 +517,15 @@ export default function SpirographPage() {
     traceLayerRef.current.draw(ctx, traceRunsRef.current, { size: W, scale, offX, offY, dpr });
 
     // ── Gear geometry setup ──────────────────────────────────────────────────
+    const pose = evaluateMesh(phi, curPenOffset, meshConfig());
+    setFitScale(pose.movingScale);
+    canvas.dataset.fitScale = String(pose.movingScale);
     const fixedR  = FIXED_BASE_R * scale;
-    const movingR = gear.radius * scale;
+    const movingR = gear.radius * pose.movingScale * scale;
     const ringW   = Math.max(5, fixedR * 0.12);
     const toothPitch = (TWO_PI * fixedR) / FIXED_TEETH;
     const toothH  = toothPitch * 0.38;
     const movingTeeth   = gear.teeth;
-    const fixedSamples  = FIXED_TEETH   * TOOTH_SAMPLES;
-    const movingSamples = movingTeeth   * TOOTH_SAMPLES;
 
     // Rotation angle for moving gear body in world frame.
     // Rack: gear rolls right → CW in screen coords → +psi, plus global rack angle.
@@ -542,208 +542,46 @@ export default function SpirographPage() {
 
     // ── Fixed gear / rack rendering ──────────────────────────────────────────
     if (sim.meshMode === "rack") {
-      // ── RACK BAR — drawn in the rack's local (rotated) frame ─────────────
-      // After ctx.rotate(rackAngle) the bar runs along the local x-axis (straight)
-      // or along the pre-rotation curved path (non-linear). In both cases the
-      // pre-rotation rack-local coords map to screen via (coord - midCoord) * scale.
-      const rackA = sim.rackAngle;
-      const cosA = Math.cos(rackA), sinA = Math.sin(rackA);
-      // Gear centre in pre-rotation rack-local screen coords
-      const mcxL =  mcxS * cosA + mcyS * sinA;
-      const mcyL = -mcxS * sinA + mcyS * cosA;
-
-      const barHalf = Math.max(4, toothH * 0.75);
-
-      // Enter rotated local frame — pre-rotation coords are now usable directly
-      ctx.save();
-      ctx.rotate(rackA);
-
-      if (rackPathT && rackPathT.length >= 6) {
-        // ── CURVED rack bar ───────────────────────────────────────────────
-        const totalLen = gear.radius * RACK_MAX_PHI;
-        const midX = sim.rackPathMidX, midY = sim.rackPathMidY;
-        const nPts = 120;
-
-        // Filled body (thick stroke)
-        ctx.beginPath();
-        for (let i = 0; i <= nPts; i++) {
-          const s = (i / nPts) * totalLen;
-          const pt = evalRackPath(rackPathT, s, totalLen);
-          const sx = (pt.x - midX) * scale;
-          const sy = (pt.y - midY) * scale;
-          if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-        }
-        ctx.lineWidth   = barHalf * 2;
-        ctx.strokeStyle = "rgba(200, 215, 245, 0.10)";
-        ctx.lineCap = "round";
-        ctx.stroke();
-
-        // Glowing edge
-        ctx.save();
-        ctx.shadowColor = "rgba(160, 175, 255, 0.4)";
-        ctx.shadowBlur  = 6;
-        ctx.beginPath();
-        for (let i = 0; i <= nPts; i++) {
-          const s = (i / nPts) * totalLen;
-          const pt = evalRackPath(rackPathT, s, totalLen);
-          const sx = (pt.x - midX) * scale;
-          const sy = (pt.y - midY) * scale;
-          if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-        }
-        ctx.lineWidth   = 1.5;
-        ctx.strokeStyle = "rgba(195, 210, 255, 0.75)";
-        ctx.stroke();
-        ctx.restore();
-
-        // Contact dot — at the current arc-length position on the path
-        const contact = evaluateRackRoute(phi, gear.radius, rackPathT);
-        const cpxS = (contact.contactX - midX) * scale;
-        const cpyS = (contact.contactY - midY) * scale;
-        ctx.save();
-        ctx.shadowColor = "rgba(255,210,80,0.7)";
-        ctx.shadowBlur  = 9;
-        ctx.beginPath();
-        ctx.arc(cpxS, cpyS, 3.5, 0, TWO_PI);
-        ctx.fillStyle = "rgba(255,220,70,0.95)";
-        ctx.fill();
-        ctx.restore();
-
-      } else {
-        // ── STRAIGHT rack bar (existing code) ─────────────────────────────
-        const rackHalfW = sim.rackHalfLen * scale;
-        const rackToothPitch = toothPitch;
-        const nRackPts = Math.round(rackHalfW * 2 / rackToothPitch) * 12;
-
-        // Profile helper: y-displacement at local screen-x (custom rack only).
-        const hasCustomRack = !!(customFixedRT && customFixedRT.length > 0);
-        const getProfileY = (localX: number): number => {
-          if (!customFixedRT || customFixedRT.length === 0) return 0;
-          const worldArc = localX / scale + sim.rackHalfLen;
-          return rackContact(worldArc, gear.radius, null, customFixedRT).y * scale;
-        };
-
-        if (hasCustomRack) {
-          const n = nRackPts;
-          ctx.beginPath();
-          for (let i = 0; i <= n; i++) {
-            const xs = -rackHalfW + (i / n) * rackHalfW * 2;
-            const py = getProfileY(xs);
-            if (i === 0) ctx.moveTo(xs, py - barHalf); else ctx.lineTo(xs, py - barHalf);
-          }
-          for (let i = n; i >= 0; i--) {
-            const xs = -rackHalfW + (i / n) * rackHalfW * 2;
-            const py = getProfileY(xs);
-            ctx.lineTo(xs, py + barHalf);
-          }
-          ctx.closePath();
-          ctx.fillStyle = "rgba(200, 215, 245, 0.08)";
-          ctx.fill();
-          ctx.save();
-          ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
-          ctx.shadowBlur = 5;
-          ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
-          ctx.lineWidth = 1.3;
-          ctx.stroke();
-          ctx.restore();
-        } else {
-          ctx.fillStyle = "rgba(200, 215, 245, 0.08)";
-          ctx.beginPath();
-          ctx.rect(-rackHalfW, -barHalf, rackHalfW * 2, barHalf * 2);
-          ctx.fill();
-
-          const drawTeeth = (yBase: number, dir: 1 | -1) => {
-            ctx.save();
-            ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
-            ctx.shadowBlur = 5;
-            ctx.beginPath();
-            ctx.moveTo(-rackHalfW, yBase);
-            for (let i = 0; i <= nRackPts; i++) {
-              const x = -rackHalfW + (i / nRackPts) * rackHalfW * 2;
-              const toothPhase = (x + sim.rackHalfLen * scale) / rackToothPitch;
-              const profile = 0.5 * (1 - Math.cos(toothPhase * TWO_PI));
-              ctx.lineTo(x, yBase + dir * toothH * profile);
-            }
-            ctx.lineTo(rackHalfW, yBase);
-            ctx.closePath();
-            ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
-            ctx.lineWidth = 1.3;
-            ctx.stroke();
-            ctx.fillStyle = "rgba(200, 215, 245, 0.07)";
-            ctx.fill();
-            ctx.restore();
-          };
-          drawTeeth(-barHalf, -1);
-          drawTeeth( barHalf,  1);
-        }
-
-        // Contact dot — in the rotated local frame using mcxL / mcyL
-        const contact = evaluateRackRoute(phi, gear.radius, null, customFixedRT);
-        const contactX = (contact.contactX - sim.rackPathMidX) * scale;
-        const contactY = (contact.contactY - sim.rackPathMidY) * scale;
-        ctx.save();
-        ctx.shadowColor = "rgba(255,210,80,0.7)";
-        ctx.shadowBlur  = 9;
-        ctx.beginPath();
-        ctx.arc(contactX, contactY, 3.5, 0, TWO_PI);
-        ctx.fillStyle = "rgba(255,220,70,0.95)";
-        ctx.fill();
-        ctx.restore();
-      }
-
-      ctx.restore(); // exit rotated local frame
+      // The rounded solid rack uses the very same polygon as contact physics.
+      ctx.save(); ctx.rotate(sim.rackAngle);
+      ctx.beginPath();
+      rackOutline(gear.radius, rackPathT, customFixedRT).forEach((p, i) => {
+        const x = (p.x - sim.rackPathMidX) * scale, y = (p.y - sim.rackPathMidY) * scale;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.closePath();
+      ctx.fillStyle = "rgba(200,215,245,0.10)"; ctx.fill();
+      ctx.strokeStyle = "rgba(195,210,255,0.75)"; ctx.lineWidth = 1.3; ctx.stroke();
+      ctx.restore();
 
     } else if (sim.meshMode === "external") {
-      // ── CENTRAL HUB (full pitch-circle radius, outward teeth) ──────────────
-      // Hub uses the same fixedR / FIXED_TEETH as the physics so teeth align.
-      // Hub tooth profile: cos(t·N)   (NO +π).
-      // Gear tooth profile: cos(la·N + π).
-      // At contact: hub_profile + gear_profile = 1 — perfect interlock.
-      const hubSamples = FIXED_TEETH * TOOTH_SAMPLES;
-
-      // Hub body fill
-      ctx.beginPath();
-      for (let i = 0; i <= hubSamples; i++) {
-        const t    = (i / hubSamples) * TWO_PI;
-        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
-        if (i === 0) ctx.moveTo(base * Math.cos(t), base * Math.sin(t));
-        else         ctx.lineTo(base * Math.cos(t), base * Math.sin(t));
-      }
-      ctx.closePath();
+      // Hub fill and edge use exactly the contact solver's toothed outline.
+      const hub = gearPath(sim.fixedShape, fixedR, sim.fixedEcc, sim.fixedSides, FIXED_TEETH, toothH, 1, customFixedRT);
       ctx.fillStyle = "rgba(200, 215, 245, 0.10)";
-      ctx.fill();
+      ctx.fill(hub);
 
-      // Outward teeth on hub — NO +π so peaks interlock with gear valleys
+      // Outward teeth on hub.
       ctx.save();
       ctx.shadowColor = "rgba(160, 175, 255, 0.3)";
       ctx.shadowBlur  = 6;
-      ctx.beginPath();
-      for (let i = 0; i <= hubSamples; i++) {
-        const t    = (i / hubSamples) * TWO_PI;
-        const base = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, t, sim.fixedSides);
-        const r    = base + toothH * 0.5 * (1 - Math.cos(t * FIXED_TEETH));
-        if (i === 0) ctx.moveTo(r * Math.cos(t), r * Math.sin(t));
-        else         ctx.lineTo(r * Math.cos(t), r * Math.sin(t));
-      }
-      ctx.closePath();
       ctx.strokeStyle = "rgba(195, 210, 255, 0.70)";
       ctx.lineWidth = 1.3;
-      ctx.stroke();
+      ctx.stroke(hub);
       ctx.restore();
 
       // Contact point
-      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides, customFixedRT);
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
       ctx.beginPath();
-      ctx.arc(contactR * Math.cos(phi), contactR * Math.sin(phi), 3.5, 0, TWO_PI);
+      ctx.arc(pose.contactX * scale, pose.contactY * scale, 3.5, 0, TWO_PI);
       ctx.fillStyle = "rgba(255,220,70,0.95)";
       ctx.fill();
       ctx.restore();
 
     } else {
       // ── INTERNAL RING (evenodd: outer smooth + inner toothed) ──────────────
-      const outer = gearPath(sim.fixedShape, fixedR + ringW, sim.fixedEcc, sim.fixedSides, FIXED_TEETH, 0, 1, customFixedRT);
+      const outer = gearPath(sim.fixedShape, fixedR, sim.fixedEcc, sim.fixedSides, FIXED_TEETH, 0, 1, customFixedRT, ringW);
       const inner = gearPath(sim.fixedShape, fixedR, sim.fixedEcc, sim.fixedSides, FIXED_TEETH, toothH, 1, customFixedRT);
       const ring = new Path2D(outer); ring.addPath(inner);
       ctx.fillStyle = "rgba(200, 215, 245, 0.10)";
@@ -764,12 +602,11 @@ export default function SpirographPage() {
       ctx.restore();
 
       // Contact point
-      const contactR = gearRadius(sim.fixedShape, fixedR, sim.fixedEcc, phi, sim.fixedSides, customFixedRT);
       ctx.save();
       ctx.shadowColor = "rgba(255,210,80,0.7)";
       ctx.shadowBlur  = 9;
       ctx.beginPath();
-      ctx.arc(contactR * Math.cos(phi), contactR * Math.sin(phi), 3.5, 0, TWO_PI);
+      ctx.arc(pose.contactX * scale, pose.contactY * scale, 3.5, 0, TWO_PI);
       ctx.fillStyle = "rgba(255,220,70,0.95)";
       ctx.fill();
       ctx.restore();
@@ -784,20 +621,19 @@ export default function SpirographPage() {
     }
 
     // ── MOVING GEAR ──────────────────────────────────────────────────────────
-    // Base disk
-    ctx.beginPath();
-    ctx.arc(mcxS, mcyS, movingR, 0, TWO_PI);
-    ctx.fillStyle = gear.color + "18";
-    ctx.fill();
-
-    // Toothed outline (or custom profile)
+    // Fill the actual shape, not a circular disk that can cross its boundary.
+    const movingPath = gearPath(sim.movingShape, movingR, sim.movingEcc, sim.movingSides, movingTeeth, toothH * pose.movingScale, 1, customMovingRT);
     ctx.save();
     ctx.translate(mcxS, mcyS); ctx.rotate(rotAngle);
+    ctx.fillStyle = gear.color + "18"; ctx.fill(movingPath);
     ctx.shadowColor = gear.color + "88"; ctx.shadowBlur = 8;
     ctx.strokeStyle = gear.color + "ee"; ctx.lineWidth = 1.5;
-    ctx.stroke(gearPath(sim.movingShape, movingR, sim.movingEcc, sim.movingSides, movingTeeth, toothH, 1, customMovingRT));
+    ctx.stroke(movingPath);
     ctx.restore();
 
+    // Keep decorative spokes, labels and holes inside noncircular gear material.
+    ctx.save(); ctx.translate(mcxS, mcyS); ctx.rotate(rotAngle); ctx.clip(movingPath);
+    ctx.rotate(-rotAngle); ctx.translate(-mcxS, -mcyS);
     // Spokes
     const nSpokes = Math.max(3, Math.round(movingTeeth / 22));
     ctx.save();
@@ -841,6 +677,7 @@ export default function SpirographPage() {
     ctx.arc(mcxS, mcyS, Math.max(3, movingR * 0.07), 0, TWO_PI);
     ctx.fillStyle = gear.color + "44"; ctx.fill();
     ctx.strokeStyle = gear.color + "bb"; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
 
     // Extra pen arms + dots (rings 2–5)
     if (extraPens && extraPens.length > 0) {
@@ -863,7 +700,6 @@ export default function SpirographPage() {
     }
 
     // Primary pen arm + dot
-    const penRpx  = curPenOffset * movingR;
     const penDotX = (penX - offX) * scale;
     const penDotY = (penY - offY) * scale;
     ctx.beginPath();
@@ -884,33 +720,18 @@ export default function SpirographPage() {
       const nrS   = nested.r2 * scale;
       const ncxS  = (nested.centerX - offX) * scale;
       const ncyS  = (nested.centerY - offY) * scale;
-      const nTeeth = Math.max(6, Math.round(gear.teeth * nested.r2 / sim.gear.radius));
-      const nSamples = nTeeth * TOOTH_SAMPLES;
-      const nPitch = (TWO_PI * nrS) / nTeeth;
-      const nToothH = nPitch * 0.38;
+      const nTeeth = nested.teeth;
+      const nToothH = nested.toothHeight * scale;
 
-      // Nested gear fill
-      ctx.beginPath();
-      ctx.arc(ncxS, ncyS, nrS, 0, TWO_PI);
-      ctx.fillStyle = "rgba(255, 200, 80, 0.06)";
-      ctx.fill();
-
-      // Nested gear toothed outline
       ctx.save();
+      ctx.translate(ncxS, ncyS); ctx.rotate(nested.theta2);
+      const nestedPath = gearPath("circle", nrS, 0, 5, nTeeth, nToothH);
+      ctx.fillStyle = "rgba(255, 200, 80, 0.06)"; ctx.fill(nestedPath);
       ctx.shadowColor = "rgba(255, 190, 60, 0.4)";
       ctx.shadowBlur = 6;
-      ctx.beginPath();
-      for (let i = 0; i <= nSamples; i++) {
-        const la = (i / nSamples) * TWO_PI;
-        const r  = nrS + nToothH * 0.5 * (1 - Math.cos(la * nTeeth + Math.PI));
-        const wa = la + nested.theta2;
-        if (i === 0) ctx.moveTo(ncxS + r * Math.cos(wa), ncyS + r * Math.sin(wa));
-        else         ctx.lineTo(ncxS + r * Math.cos(wa), ncyS + r * Math.sin(wa));
-      }
-      ctx.closePath();
       ctx.strokeStyle = "rgba(255, 200, 80, 0.80)";
       ctx.lineWidth = 1.2;
-      ctx.stroke();
+      ctx.stroke(nestedPath);
       ctx.restore();
 
       // Hub of nested gear
@@ -937,7 +758,7 @@ export default function SpirographPage() {
     }
 
     ctx.restore(); // translate(cx, cy)
-  }, []);
+  }, [meshConfig]);
 
   // ─── Draw idle ──────────────────────────────────────────────────────────────
   const drawIdle = useCallback((
@@ -957,7 +778,7 @@ export default function SpirographPage() {
       fShape, FIXED_BASE_R, fEcc, sim.fixedTable, fSides,
       mShape, gear.radius,  mEcc, sim.movingTable, mSides,
       pOff, mode,
-      customFixedRRef.current, customMovingRRef.current, rackPath,
+      customFixedRRef.current, customMovingRRef.current, rackPath, gear.teeth,
     );
     // Apply rack rotation (no bottom-pass mirroring at idle phi0)
     let mcx = state.movingCenterX, mcy = state.movingCenterY;
@@ -1009,7 +830,7 @@ export default function SpirographPage() {
     const state0 = computeMeshState(
       idlePhi, fShape, FIXED_BASE_R, fEcc, ft, fSides,
       mShape, gear.radius, mEcc, mt, mSides, pOff, mode,
-      customFixedRRef.current, customMovingRRef.current, rackPath,
+      customFixedRRef.current, customMovingRRef.current, rackPath, gear.teeth,
     );
     // Apply rack rotation to idle frame
     let idle0mcx = state0.movingCenterX, idle0mcy = state0.movingCenterY;
@@ -1043,7 +864,7 @@ export default function SpirographPage() {
         if (nestedOn) {
           const ns = nestedGear(ph, gearOrientation(ph, st.psi, mode, sim.rackAngle),
             st.movingCenterX, st.movingCenterY,
-            gear.radius, nestedR2, nestedN, nestedD);
+            gear.radius, nestedR2, nestedN, nestedD, config, st.movingScale);
           px = cx + (ns.penX - offX) * scale;
           py = cy + (ns.penY - offY) * scale;
         } else {
@@ -1087,7 +908,7 @@ export default function SpirographPage() {
       const nested = nestedEnabled ? {
         ...nestedGear(simRef.current.phi, gearOrientation(simRef.current.phi, state.psi, c.mode, c.rackAngle),
           state.movingCenterX, state.movingCenterY, c.movingRadius, c.movingRadius * nestedRatio / 100,
-          nestedSpeed, nestedPenOffset), r2: c.movingRadius * nestedRatio / 100,
+          nestedSpeed, nestedPenOffset, c, state.movingScale),
       } : undefined;
       renderFrame(simRef.current.phi, state.psi, state.movingCenterX, state.movingCenterY, state.penX, state.penY,
         computeScale(c.mode, simRef.current.gear, getCanvasSize(), simRef.current.rackBounds), penColor, effectivePenOffset,
@@ -1162,9 +983,9 @@ export default function SpirographPage() {
         const rawNested = nestedGear(
           sim.phi, gearOrientation(sim.phi, state.psi, capMode, config.rackAngle),
           effMcx, effMcy,
-          capGear.radius, capNR2, capNN, capND,
+          capGear.radius, capNR2, capNN, capND, config, state.movingScale,
         );
-        nestedState = { ...rawNested, r2: capNR2 };
+        nestedState = rawNested;
         currentRunRef.current?.points.push({ x: rawNested.penX, y: rawNested.penY });
       } else {
         currentRunRef.current?.points.push({ x: effPenX, y: effPenY });
@@ -1805,6 +1626,12 @@ export default function SpirographPage() {
             <ControlSlider label="Ratio" value={gearRatio} min={20} max={80} step={1}
               onChange={handleGearRatioInput} onInput={handleGearRatioInput}
               display={(v) => `${v}% · R${computedGear.radius}`} />
+            {fitScale < 0.999 && meshMode === "internal" && (
+              <p role="status" className="text-xs text-amber-200/80">
+                Auto-fit: gear reduced to {Math.round(fitScale * 100)}% of its requested size so it fits throughout rotation.
+              </p>
+            )}
+            {nestedEnabled && <p className="text-xs text-muted-foreground">Nested gears are also auto-fitted to stay inside their parent shape.</p>}
             {meshMode === "rack" && (<>
               <ControlSlider label="Angle" value={rackAngle} min={0} max={360} step={1}
                 onChange={handleRackAngle} onInput={handleRackAngle}

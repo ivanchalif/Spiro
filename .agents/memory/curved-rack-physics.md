@@ -4,16 +4,11 @@ description: How non-linear rack paths are represented and how the gear rolls on
 ---
 
 ## Rule
-Use intrinsic-curve representation: define each path by tangent angle α(s) as a function of arc length s, then integrate numerically to get (x, y). This avoids approximations and gives exact tangential rolling.
+Use arc-length-based rack paths, preserving continuous travel around both ends and along the reverse face.
 
-**Why:** Parameterising by arc length means the gear rolls the same distance regardless of path shape. The gear center offset perpendicular to the tangent is always `R·[sin α, -cos α]`, and `psi = psiRolling + alpha` bakes the path tangent into the returned orientation. All existing rotation formulas `psi + rackAngle` in callers remain correct without changes.
+**Why:** The user explicitly corrected “wrap around”: resetting to the beginning or jumping between rack sides is not acceptable.
 
 ## How to apply
-- `buildRackPathTable(curveType, bend, totalLen, N)` returns a packed `Float64Array [x, y, α …]` for N+1 arc-length samples (Simpson integration).
-- `evalRackPath(table, s, totalLen)` interpolates `{x, y, alpha}` at any arc length.
-- `computeMeshState` last optional param: `rackPathTable?: Float64Array | null`. When provided, it uses `evalRackPath` instead of the straight-line formula.
-- The gear should loop around the end and continue on the reverse side of the rack, continuously, including curved racks. Restarting at the beginning or jumping directly between sides does not satisfy this requirement.
-
-**Why:** The user explicitly corrected the interpretation of “wrap around”: they mean traveling around the endpoint, not resetting the animation.
-
-**How to apply:** Evaluate endpoint transitions as part of the complete route, and check continuity of both gear position and pen trace across each turnaround.
+- Treat endpoint turns as part of one closed route, including curved racks.
+- Check continuity of both gear position and pen trace across the turnarounds.
+- A nominal-radius offset alone is inadequate for noncircular gears or rack thickness. Actual outline contact must determine clearance.

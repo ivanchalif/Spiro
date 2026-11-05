@@ -1,2 +1,3 @@
 - [Curved rack physics](curved-rack-physics.md) — the user requires continuous travel around both endpoints, not a reset or a jump between rack sides.
 - [Long-session history](long-session-history.md) — preserve visible artwork by flattening older vectors; recent-stroke undo is intentionally limited.
+- [Shape contact constraints](shape-contact-constraints.md) — complete outlines must not overlap; disclose constant auto-fitting for oversized interior and nested gears.

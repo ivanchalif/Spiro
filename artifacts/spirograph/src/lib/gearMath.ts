@@ -1,4 +1,5 @@
-import { evaluateRackRoute } from "./rackRoute";
+import { evaluateRackRoute, rackOutline } from "./rackRoute";
+import { outline, transformOutline, fittingScale, boundaryContact, TOOTH_HEIGHT, type Vertex } from "./contactGeometry";
 
 export type GearShape = "circle" | "ellipse" | "polygon" | "custom";
 export type MeshMode  = "internal" | "external" | "rack";
@@ -109,6 +110,34 @@ export interface GearMeshState {
   movingCenterY: number;
   penX: number;
   penY: number;
+  movingScale: number;
+  contactX: number;
+  contactY: number;
+}
+
+const contourCache = new WeakMap<Float64Array, Map<string, Vertex[]>>();
+export function gearContour(
+  table: Float64Array, shape: GearShape, radius: number, ecc: number, sides: number,
+  profile?: Float64Array | null, teeth = Math.max(4, Math.round(124 * radius / 155)),
+): Vertex[] {
+  let entries = contourCache.get(table);
+  if (!entries) { entries = new Map(); contourCache.set(table, entries); }
+  const key = `${shape}:${radius}:${ecc}:${sides}:${teeth}:${identity(profile)}`;
+  let points = entries.get(key);
+  if (!points) {
+    points = outline(a => gearRadius(shape, radius, ecc, a, sides, profile), teeth, shape === "custom" ? 0 : TOOTH_HEIGHT);
+    entries.set(key, points);
+  }
+  return points;
+}
+
+const fitCache = new WeakMap<Vertex[], WeakMap<Vertex[], number>>();
+function cachedFit(fixed: Vertex[], moving: Vertex[]) {
+  let entries = fitCache.get(fixed);
+  if (!entries) { entries = new WeakMap(); fitCache.set(fixed, entries); }
+  let scale = entries.get(moving);
+  if (scale === undefined) { scale = fittingScale(fixed, moving); entries.set(moving, scale); }
+  return scale;
 }
 
 function arcLengthAlongFixed(table: Float64Array, phi: number): number {
@@ -132,12 +161,11 @@ function arcLengthAlongFixed(table: Float64Array, phi: number): number {
  * meshMode:
  *   "internal" — hypocycloid: moving gear rolls inside the fixed ring (default).
  *   "external" — epicycloid:  moving gear orbits outside a fixed hub.
- *   "rack"     — trochoid:    moving gear rolls along a straight rack.
- *                The rack lies along y = 0; gear center at y = movingBaseR.
- *                x grows as phi increases (not periodic in screen space).
+ *   "rack"     — a closed route along both rack sides and around its endpoints.
+ * Complete rendered boundaries determine contact, not radial subtraction.
  * customFixedRTable / customMovingRTable: normalized r(θ) for custom gear shapes.
  */
-export function computeMeshState(
+function solveMeshState(
   phi: number,
   fixedShape: GearShape, fixedBaseR: number, fixedEcc: number,
   fixedTable: Float64Array, fixedSides: number,
@@ -148,7 +176,9 @@ export function computeMeshState(
   customFixedRTable?: Float64Array | null,
   customMovingRTable?: Float64Array | null,
   rackPathTable?: Float64Array | null,   // curved rack path (from buildRackPathTable)
+  movingTeeth = Math.max(4, Math.round(124 * movingBaseR / 155)),
 ): GearMeshState {
+  const moving = gearContour(movingTable, movingShape, movingBaseR, movingEcc, movingSides, customMovingRTable, movingTeeth);
   // ── Rack mode ────────────────────────────────────────────────────────────
   if (meshMode === "rack") {
     const route = evaluateRackRoute(phi, movingBaseR, rackPathTable, customFixedRTable);
@@ -157,51 +187,70 @@ export function computeMeshState(
     // Keep complete rotations instead of a modulo angle so endpoint rotations are continuous.
     const psiRolling = Math.floor(arcLen / circumference) * TWO_PI
       + angleForArcLength(movingTable, arcLen);
-    const cx = route.centerX, cy = route.centerY;
     const psi = psiRolling + route.heading;
-
+    const dx = (route.centerX - route.contactX) / movingBaseR;
+    const dy = (route.centerY - route.contactY) / movingBaseR;
+    const contact = boundaryContact(
+      rackOutline(movingBaseR, rackPathTable, customFixedRTable),
+      transformOutline(moving, psi),
+      { x: route.contactX, y: route.contactY }, { x: dx, y: dy }, false,
+    );
+    const cx = contact.centerX, cy = contact.centerY;
     const d = penOffset * movingBaseR;
     return {
       phi, psi, arcLenFixed: arcLen,
       movingCenterX: cx, movingCenterY: cy,
       penX: cx + d * Math.cos(psi),
       penY: cy + d * Math.sin(psi),
+      movingScale: 1, contactX: contact.contactX, contactY: contact.contactY,
     };
   }
 
   // ── Shared arc-length lookup (internal / external) ───────────────────────
   const arcLen = arcLengthAlongFixed(fixedTable, phi);
-  const psi    = angleForArcLength(movingTable, arcLen);
-  const Rf     = gearRadius(fixedShape,  fixedBaseR,  fixedEcc,  phi, fixedSides,  customFixedRTable);
-  const Rm     = gearRadius(movingShape, movingBaseR, movingEcc, psi, movingSides, customMovingRTable);
-
-  // ── External mode (epicycloid) ───────────────────────────────────────────
-  if (meshMode === "external") {
-    const centerDist = Rf + Rm;
-    const cx = centerDist * Math.cos(phi);
-    const cy = centerDist * Math.sin(phi);
-    const penAngleWorld = phi + psi + Math.PI;
-    const d = penOffset * movingBaseR;
-    return {
-      phi, psi, arcLenFixed: arcLen,
-      movingCenterX: cx, movingCenterY: cy,
-      penX: cx + d * Math.cos(penAngleWorld),
-      penY: cy + d * Math.sin(penAngleWorld),
-    };
-  }
-
-  // ── Internal mode (hypocycloid, default) ─────────────────────────────────
-  const centerDist = Math.max(0, Rf - Rm);
-  const cx = centerDist * Math.cos(phi);
-  const cy = centerDist * Math.sin(phi);
-  const penAngleWorld = phi - psi;
-  const d = penOffset * movingBaseR;
+  const fixed = gearContour(fixedTable, fixedShape, fixedBaseR, fixedEcc, fixedSides, customFixedRTable, 124);
+  const movingScale = meshMode === "internal" ? cachedFit(fixed, moving) : 1;
+  const psi = angleForArcLength(movingTable, arcLen / movingScale);
+  const penAngleWorld = meshMode === "external" ? phi + psi + Math.PI : phi - psi;
+  const contact = boundaryContact(fixed, transformOutline(moving, penAngleWorld, movingScale),
+    { x: 0, y: 0 }, { x: Math.cos(phi), y: Math.sin(phi) }, meshMode === "internal");
+  const cx = contact.centerX, cy = contact.centerY;
+  const d = penOffset * movingBaseR * movingScale;
   return {
     phi, psi, arcLenFixed: arcLen,
     movingCenterX: cx, movingCenterY: cy,
     penX: cx + d * Math.cos(penAngleWorld),
     penY: cy + d * Math.sin(penAngleWorld),
+    movingScale, contactX: contact.contactX, contactY: contact.contactY,
   };
+}
+
+const poses = new WeakMap<Float64Array, WeakMap<Float64Array, Map<string, GearMeshState>>>();
+const identities = new WeakMap<Float64Array, number>();
+let nextIdentity = 0;
+function identity(table?: Float64Array | null) {
+  if (!table) return 0;
+  if (!identities.has(table)) identities.set(table, ++nextIdentity);
+  return identities.get(table)!;
+}
+
+/** Multiple pens and the renderer share a contact pose, not separate solvers. */
+export function computeMeshState(...args: Parameters<typeof solveMeshState>): GearMeshState {
+  const [phi, fs, fr, fe, ft, fn, ms, mr, me, mt, mn, pen, mode = "internal", cf, cm, rack, teeth] = args;
+  let movingCaches = poses.get(ft);
+  if (!movingCaches) { movingCaches = new WeakMap(); poses.set(ft, movingCaches); }
+  let cache = movingCaches.get(mt);
+  if (!cache) { cache = new Map(); movingCaches.set(mt, cache); }
+  const key = [phi, fs, fr, fe, fn, ms, mr, me, mn, mode, identity(cf), identity(cm), identity(rack), teeth].join(":");
+  let state = cache.get(key);
+  if (!state) {
+    state = solveMeshState(...args);
+    if (cache.size >= 2048) cache.delete(cache.keys().next().value!);
+    cache.set(key, state);
+  }
+  const angle = mode === "rack" ? state.psi : mode === "external" ? phi + state.psi + Math.PI : phi - state.psi;
+  const d = pen * mr * state.movingScale;
+  return { ...state, penX: state.movingCenterX + d * Math.cos(angle), penY: state.movingCenterY + d * Math.sin(angle) };
 }
 
 // ── Rack curve types ─────────────────────────────────────────────────────────
