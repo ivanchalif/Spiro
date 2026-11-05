@@ -4,7 +4,14 @@ export interface TraceRun {
   weight: number;
   action?: number;
 }
-export interface TraceView { size: number; scale: number; offX: number; offY: number; dpr: number }
+export interface TraceView { size: number; scale: number; offX: number; offY: number; dpr: number; copies?: number }
+
+export function getCopyColor(ci: number, totalCopies: number, baseColor: string): string {
+  if (ci === 0) return baseColor;
+  const colors = ["#f472b6", "#34d399", "#fbbf24", "#a78bfa"];
+  if (totalCopies <= 5) return colors[(ci - 1) % colors.length];
+  return `hsl(${Math.round(ci / totalCopies * 360)}, 80%, 60%)`;
+}
 
 /** Rasterizes only newly appended segments; retained vectors support recent undo and resizing. */
 export class TraceLayer {
@@ -19,17 +26,23 @@ export class TraceLayer {
 
   private paint(ctx: CanvasRenderingContext2D, run: TraceRun, from: number, v: TraceView) {
     if (run.points.length < 2) return;
-    ctx.strokeStyle = run.color;
-    ctx.lineWidth = run.weight;
-    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.globalAlpha = 0.9;
-    ctx.beginPath();
-    for (let i = Math.max(0, from - 1); i < run.points.length; i++) {
-      const p = run.points[i];
-      const x = v.size / 2 + (p.x - v.offX) * v.scale;
-      const y = v.size / 2 + (p.y - v.offY) * v.scale;
-      if (i === Math.max(0, from - 1)) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    const copies = Math.max(1, v.copies ?? 1);
+    for (let ci = 0; ci < copies; ci++) {
+      const angle = ci * 2 * Math.PI / copies;
+      const cos = Math.cos(angle), sin = Math.sin(angle);
+      ctx.strokeStyle = getCopyColor(ci, copies, run.color);
+      ctx.lineWidth = run.weight;
+      ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      for (let i = Math.max(0, from - 1); i < run.points.length; i++) {
+        const p = run.points[i];
+        const dx = (p.x - v.offX) * v.scale, dy = (p.y - v.offY) * v.scale;
+        const x = v.size / 2 + dx * cos - dy * sin;
+        const y = v.size / 2 + dx * sin + dy * cos;
+        if (i === Math.max(0, from - 1)) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
     }
-    ctx.stroke();
   }
 
   /** Keep older artwork as a fixed-size image rather than silently deleting it. */
@@ -40,7 +53,7 @@ export class TraceLayer {
       this.archive.width = this.archive.height = Math.round(view.size * view.dpr);
       this.archiveView = { ...view };
     }
-    const v = this.archiveView!;
+    const v = { ...this.archiveView!, copies: view.copies };
     const ctx = this.archive.getContext("2d")!;
     ctx.setTransform(v.dpr, 0, 0, v.dpr, 0, 0);
     for (const run of runs) this.paint(ctx, run, 0, v);

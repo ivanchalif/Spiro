@@ -15,6 +15,7 @@ export const savedDrawingSchema = z.object({
     movingShape: shape, movingEcc: range(0, 1), movingSides: range(3, 12).int(),
     rackAngle: range(0, 360), rackCurveType: z.enum(["straight", "arc", "wave", "spiral"]), rackBend: range(0, 100),
     penMode: z.enum(["interior", "circumference"]), penOffset: range(0, 1), penCount: range(1, 5).int(),
+    rotCopies: range(1, 12).int().default(1),
     penWeight: range(0.5, 10), penColor: z.string().regex(/^#[0-9a-f]{6}$/i),
     rainbow: z.boolean(), compositeMode: z.boolean(), speed: z.enum(["partial", "full", "accelerated"]),
     nestedEnabled: z.boolean(), nestedRatio: range(10, 80), nestedSpeed: range(1, 8).int(), nestedPenOffset: range(0, 1),
